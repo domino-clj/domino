@@ -1,7 +1,5 @@
 ## General concepts
 
-Changes in the UI should always reflect the state of the data in the application. Therefore, any change in the UI can be inferred from the changes in the underlying data.
-
 In many cases changes to a particular field in the data model often require changes to other fields as well.
 
 We need a method to represent relationships in the business logic, and to explicitly declare how different business rules relate to one another.
@@ -15,6 +13,18 @@ The business rules can now be run transactionally against the current state of t
 
 By declaring
 
+## Architectural concepts
+
+Datagrid is a monorepo with several sub-projects.
+
+- datagrid-core: The event engine and API to hook into implementations (e.g. front-end or back-end) 
+- datagrid-ui: Reagent?
+- datagrid-memory: Engine to run in memory -- can be cljc to support execution on both front or back? Perhaps fits with core? TBD
+- datagrid-ws:
+- datagrid-ajax: 
+
+(maybe others?)
+
 ## Components
 
 ### event engine
@@ -23,21 +33,73 @@ The event engine requires a model definition
 
 ```clojure
 :model
-{:path-id {:model/path [:path :to :field]
-           :type :integer ;optional type for coercion and validation
+{:path-id {:path       [:path :to :field]
+           :spec       integer? ;optional type for coercion and validation
            :validation [:required]}}
 ```
 
-The events have two categories:
+TODO: change type to :spec, so can perhaps be a data spec? This permits using it for collections
+
+Events can be one of three types:
 * effectful events used to send outputs to IO, e.g: changing state of UI widgets
 * data events that transform the state of the model
+* collection events for manipulating arbitrary data collections
 
 ```clojure
-[{:inputs [:path1 :path2]
+[{:inputs  [:path1 :path2]
   :outputs [:path3]
+  :type    :data
   :handler (fn [context [path1 path2] [path3]]
              ["value for path 3"])}]
 ```
+
+### Managing collection values
+
+TODO: how are collections stored
+
+TODO: talk about some challenges/edge cases/limitations
+
+#### Collection events
+
+There are three types of collection events:
+
+- `:col/add`
+- `:col/remove`
+- `:col/move`
+
+If using collection events, a `:spec` is required in your path definition.
+
+TODO: talk about how addition works given spec. Perhaps some way to define a default item to insert??
+
+TODO: Remove event
+
+TODO: Move event
+
+An example definition of valid collection events for a given path: 
+
+```clojure
+{:type     :collection
+ :inputs   [:path]
+ :outputs  [:path]
+ :actions  [:col/add :col/remove :col/move]}
+```
+
+#### Modifying collection children
+
+### Processing events
+
+When the value of a path in the model's map is changed, the event engine executes.
+
+1. Generate the dependency graph of events that have that path as an input
+2. Sequentially (TODO: synchronously or not? Presumably synchronously due to nature of dependencies) execute the `handler` for each event
+
+#### Dependency graph
+
+The dependency graph is generated from inputs and outputs. If an event has an output path that is used in inputs for other events, it is meant to propagate, and so the graph continues.
+
+However, if an event's handler is already executed once in a single engine execution, it is skipped to prevent dependency recursion.
+
+It's "kind of" like a DAG, but not really due to one-directional nature and custom handling for dependency resolution. 
 
 ### event sources
 
@@ -58,6 +120,8 @@ The events have two categories:
 #### API
 
 ### UI library
+
+Changes in the UI should always reflect the state of the data in the application. Therefore, any change in the UI can be inferred from the changes in the underlying data.
 
 When changes in the DOM are driven by changes in the data we know precisely what nodes need to be virtual. I agree that everything Svelte does can be done using a macro. Basically, you can generate the DOM nodes in the browser, and keep references to the ones that are associated with the data elements. Whenever the data changes you repaint the nodes with updated values.
 
