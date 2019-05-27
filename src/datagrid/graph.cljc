@@ -56,44 +56,62 @@
                    [a])}])
 
 (def rules3
-  [{:inputs [:a]
+  [{:inputs  [:a]
     :outputs [:a :b]}
-   {:inputs [:b]
+   {:inputs  [:b]
     :outputs [:b :a]}])
 
 (def rules4
-  [{:inputs []
+  [{:inputs  []
     :outputs []}
-   {:inputs [:a]
+   {:inputs  [:a]
     :outputs [:b]}])
 
-(defn find-related [input nodes]
+(defn find-related
+  [input nodes]
   (->> nodes
        (keep (fn [{:keys [inputs outputs]}]
                (when (some #{input} outputs)
                  (remove #(= input %) inputs))))
        (apply concat)))
 
-(defn add-nodes [ctx inputs]
+(def conj-set (fnil conj #{}))
+(def into-set (fnil into #{}))
+
+(defn add-nodes
+  [ctx inputs]
   (reduce
     (fn [[{:keys [nodes] :as ctx} inputs] input]
       (let [related (find-related input nodes)]
         [(-> ctx
-             (update :visited (fnil conj #{}) input)
-             (update :graph update input (fnil into #{}) related))
+             (update :visited conj-set input)
+             (update :graph update input into-set related))
          (into inputs related)]))
     [ctx #{}]
     inputs))
 
+(defn base-graph-ctx
+  [nodes]
+  {:nodes nodes
+   :graph {}
+   :steps 0})
+
+(defn input-nodes
+  [rules]
+  (distinct (mapcat :inputs rules)))
+
 (defn connect
-  ([nodes] (connect {:nodes nodes :graph {} :steps 0} (distinct (mapcat :inputs nodes))))
+  ([nodes]
+   (connect (base-graph-ctx nodes)
+            (input-nodes nodes)))
   ([ctx inputs]
-   (let [[ctx inputs] (add-nodes ctx inputs)]
-     (if (and (not-empty inputs) (< (:steps ctx) 5))
+   (let [[{:keys [steps visited graph] :as ctx} inputs] (add-nodes ctx inputs)]
+     (if (and (not-empty inputs) (< steps 5))
        (do
-         (println (:graph ctx) inputs)
-         (recur (update ctx :steps inc) (remove #(some #{%} (:visited ctx)) inputs)))
-       (:graph ctx)))))
+         (println graph inputs)
+         (recur (update ctx :steps inc)
+                (remove #(some #{%} visited) inputs)))
+       graph))))
 
 (comment
 
@@ -102,6 +120,5 @@
   (find-related :a rules1)
 
   (-> (add-nodes {:nodes rules1 :graph {}} [:a]) first :visited)
-
 
   )

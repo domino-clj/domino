@@ -37,7 +37,7 @@
      :handler (fn [ctx [bmi] [note]])}
     {:inputs  [:items]
      :outputs [:note]
-     :handler (fn [ctx [[[:items 0 :value] "value"]] [note]])}]})
+     :handler (fn [ctx #_[[[:items 0 :value] "value"]] [note]])}]})
 
 
 #_(def form

@@ -12,7 +12,8 @@
   [[lein-cljsbuild "1.1.7"]
    [lein-figwheel "0.5.18"]
    [cider/cider-nrepl "0.21.1"]
-   [lein-doo "0.1.10"]]
+   [lein-doo "0.1.10"]
+   [com.jakemccrary/lein-test-refresh "0.24.1"]]
 
   :clojurescript? true
   :jar-exclusions [#"\.swp|\.swo|\.DS_Store"]
