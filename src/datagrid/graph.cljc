@@ -55,9 +55,23 @@
     #_#_:handler (fn [ctx [b] [a]]
                    [a])}])
 
+(def rules3
+  [{:inputs [:a]
+    :outputs [:a :b]}
+   {:inputs [:b]
+    :outputs [:b :a]}])
+
+(def rules4
+  [{:inputs []
+    :outputs []}
+   {:inputs [:a]
+    :outputs [:b]}])
+
 (defn find-related [input nodes]
   (->> nodes
-       (keep (fn [{:keys [inputs outputs]}] (when (some #{input} outputs) inputs)))
+       (keep (fn [{:keys [inputs outputs]}]
+               (when (some #{input} outputs)
+                 (remove #(= input %) inputs))))
        (apply concat)))
 
 (defn add-nodes [ctx inputs]
