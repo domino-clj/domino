@@ -34,7 +34,8 @@
      [binaryage/devtools "0.9.10"]
      [cider/piggieback "0.4.0"]
      [figwheel-sidecar "0.5.18"]
-     [reagent "0.8.1"]]
+     [reagent "0.8.1"]
+     [cheshire "5.8.1"]]
 
     :source-paths ["src/clj" "src/cljc" "src/cljs" "env/dev/clj" "env/dev/cljs"]
     :resource-paths ["resources" "env/dev/resources" "target/cljsbuild"]

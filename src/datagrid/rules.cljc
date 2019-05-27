@@ -40,7 +40,7 @@
      :handler (fn [ctx [[[:items 0 :value] "value"]] [note]])}]})
 
 
-(def form
+#_(def form
   {:model
    {:height-cm (r/atom)}
    :ui/events [(fn [ctx inputs outputs])]
@@ -51,7 +51,7 @@
 
 
 ;;todo add validation parsing
-(defn init-model [form]
+#_#_(defn init-model [form]
   (let [model (atom {})]
     (update form :model
             (fn [model]
