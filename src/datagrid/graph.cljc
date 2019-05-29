@@ -21,20 +21,20 @@
 (def rules1
   [{:inputs  [:a]
     :outputs [:b]
-    #_#_:handler (fn [ctx [a] [b]]
+    :handler (fn [ctx [a] [b]]
                    [b])}
    {:inputs  [:b]
     :outputs [:a]
-    #_#_:handler (fn [ctx [b] [a]]
+    :handler (fn [ctx [b] [a]]
                    [a])}
    {:inputs  [:b]
     :outputs [:c]
-    #_#_:handler (fn [ctx [b] [a]]
+    :handler (fn [ctx [b] [a]]
                    [a])}])
 
 (def rules2
   [{:inputs  [:a]
-    :outputs [:b]
+    :outputs [:b :c]
     #_#_:handler (fn [ctx [a] [b]]
                    [b])}
    {:inputs  [:b]
@@ -50,7 +50,7 @@
     #_#_:handler (fn [ctx [b] [a]]
                    [a])}
 
-   {:inputs  [:d]
+   {:inputs  [:d :a :g]
     :outputs [:e]
     #_#_:handler (fn [ctx [b] [a]]
                    [a])}])
@@ -76,6 +76,7 @@
        (apply concat)))
 
 (def conj-set (fnil conj #{}))
+
 (def into-set (fnil into #{}))
 
 (defn add-nodes
@@ -93,8 +94,7 @@
 (defn base-graph-ctx
   [nodes]
   {:nodes nodes
-   :graph {}
-   :steps 0})
+   :graph {}})
 
 (defn input-nodes
   [rules]
@@ -105,19 +105,16 @@
    (connect (base-graph-ctx nodes)
             (input-nodes nodes)))
   ([ctx inputs]
-   (let [[{:keys [steps visited graph] :as ctx} inputs] (add-nodes ctx inputs)]
-     (if (and (not-empty inputs) (< steps 5))
-       (do
-         (println graph inputs)
-         (recur (update ctx :steps inc)
-                (remove #(some #{%} visited) inputs)))
+   (let [[{:keys [visited graph] :as ctx} inputs] (add-nodes ctx inputs)]
+     (if (not-empty inputs)
+       (recur ctx (remove #(some #{%} visited) inputs))
        graph))))
 
 (comment
 
   (connect rules2)
 
-  (find-related :a rules1)
+  (connect rules1)
 
   (-> (add-nodes {:nodes rules1 :graph {}} [:a]) first :visited)
 
