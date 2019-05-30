@@ -67,17 +67,23 @@
    {:inputs  [:a]
     :outputs [:b]}])
 
-(defn find-related
-  [input nodes]
-  (->> nodes
-       (keep (fn [{:keys [inputs outputs]}]
-               (when (some #{input} outputs)
-                 (remove #(= input %) inputs))))
-       (apply concat)))
-
 (def conj-set (fnil conj #{}))
 
 (def into-set (fnil into #{}))
+
+(defn find-related
+  [input nodes]
+  (->> nodes
+       (keep (fn [{:keys [inputs outputs] :as node}]
+               (when (some #{input} outputs)
+                 {:node node
+                  :inputs (remove #(= input %) inputs)})))
+       (reduce
+         (fn [related [node inputs]]
+           (-> related
+               (update :nodes conj-set node)
+               (update :inputs conj-set inputs)))
+         {})))
 
 (defn add-nodes
   [ctx inputs]

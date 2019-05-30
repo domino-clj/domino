@@ -13,13 +13,18 @@
     :bmi    {:model/path [:vitals :bmi]}
     :note   {:model/path [:note]}}
 
-   :ui/events
+   :effects
+   {:effect-name {:initial :state}
+    :bmi-widget {:visible? false
+                 :valid? true}}
+
+   :model/effects
    [{:type :ui
      :inputs [:bmi]
      :targets [:bmi-widget]
      :handler (fn [ctx [bmi] [target]]
                 [{:visible? true
-                  :valide? false}])}]
+                  :valid? false}])}]
 
    :model/events
    [{:type :collection
