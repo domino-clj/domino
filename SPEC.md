@@ -17,15 +17,23 @@ By declaring
 
 Datagrid is a monorepo with several sub-projects.
 
-- datagrid-core: The event engine and API to hook into implementations (e.g. front-end or back-end) 
+- datagrid-core: The event engine and API to hook into implementations (e.g. front-end or back-end)
 - datagrid-ui: Reagent?
 - datagrid-memory: Engine to run in memory -- can be cljc to support execution on both front or back? Perhaps fits with core? TBD
 - datagrid-ws:
-- datagrid-ajax: 
+- datagrid-ajax:
 
 (maybe others?)
 
 ## Components
+
+### Model
+```clojure
+[[:title {:validation ..}]
+ [:user {:id :user}
+  [:first-name {:id :fname}]
+  [:last-name {:id :lname}]]]
+```
 
 ### event engine
 
@@ -53,6 +61,24 @@ Events can be one of three types:
              ["value for path 3"])}]
 ```
 
+#### Using the event engine
+A changeset is given as an input, events that take nodes in the changeset as inputs are then triggered, returning an expanded changeset.
+
+ kg 10, lb 10
+ lb 10, kg 10
+
+ [kg->lb, lb->kg]
+   Run kg->lb
+   kg 10, lb 22
+   Run lb->kg
+   NO CHANGE
+
+  [lb->kg, kg->lb]
+   Run lb->kg
+   kg 4.? lb 10
+   Run kg->lb
+   no change
+
 ### Managing collection values
 
 TODO: how are collections stored
@@ -75,7 +101,7 @@ TODO: Remove event
 
 TODO: Move event
 
-An example definition of valid collection events for a given path: 
+An example definition of valid collection events for a given path:
 
 ```clojure
 {:type     :collection
@@ -99,7 +125,7 @@ The dependency graph is generated from inputs and outputs. If an event has an ou
 
 However, if an event's handler is already executed once in a single engine execution, it is skipped to prevent dependency recursion.
 
-It's "kind of" like a DAG, but not really due to one-directional nature and custom handling for dependency resolution. 
+It's "kind of" like a DAG, but not really due to one-directional nature and custom handling for dependency resolution.
 
 ### event sources
 
