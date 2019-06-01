@@ -2,22 +2,22 @@
   (:require [clojure.string :as string]))
 
 (def weight
-  [{:name :foo
-    :inputs [:foo]
+  [{:name    :foo
+    :inputs  [:foo]
     :outputs [:bar]}
-   {:name :kg->lb
-    :inputs [:kg]
+   {:name    :kg->lb
+    :inputs  [:kg]
     :outputs [:lb]
     :handler '(fn [_ [kg] [_]]
-               [(* kg 2.2)])}
-   {:name :lb->kg
+                [(* kg 2.2)])}
+   {:name    :lb->kg
     :outputs [:kg]
-    :inputs [:lb]
+    :inputs  [:lb]
     :handler '(fn [_ [lb] [_]]
-               [(/ lb 2.2)])}
-   {:name :kg->bmi
+                [(/ lb 2.2)])}
+   {:name    :kg->bmi
     :outputs [:bmi]
-    :inputs [:kg]}])
+    :inputs  [:kg]}])
 
 (def events
   [{:inputs  [:a :b]
@@ -41,15 +41,15 @@
   [{:inputs  [:a]
     :outputs [:b]
     :handler (fn [ctx [a] [b]]
-                   [b])}
+               [b])}
    {:inputs  [:b]
     :outputs [:a]
     :handler (fn [ctx [b] [a]]
-                   [a])}
+               [a])}
    {:inputs  [:b]
     :outputs [:c]
     :handler (fn [ctx [b] [a]]
-                   [a])}])
+               [a])}])
 
 (def events2
   [{:inputs  [:a]
@@ -92,10 +92,10 @@
 
 (defn get-all-nodes [events]
   (reduce
-   (fn [nodes {:keys [inputs outputs]}]
-     (into nodes (concat inputs outputs)))
-   #{}
-   events))
+    (fn [nodes {:keys [inputs outputs]}]
+      (into nodes (concat inputs outputs)))
+    #{}
+    events))
 
 (defn find-related
   "finds other nodes related by eventset"
@@ -110,16 +110,16 @@
   [input-node events]
   (-> events
       (->>
-       (keep (fn [{:keys [inputs outputs] :as event}]
-               (when (some #{input-node} outputs)
-                 [event inputs])))
-       (reduce
-        (fn [related [event inputs]]
-          (-> related
-              (update :events conj event)
-              (update :inputs into inputs)))
-        {:events []
-         :inputs #{}}))
+        (keep (fn [{:keys [inputs outputs] :as event}]
+                (when (some #{input-node} outputs)
+                  [event inputs])))
+        (reduce
+          (fn [related [event inputs]]
+            (-> related
+                (update :events conj event)
+                (update :inputs into inputs)))
+          {:events []
+           :inputs #{}}))
       (update :inputs disj input-node)))
 
 (defn generate-map
@@ -128,8 +128,8 @@
   ([keyfn valfn coll]
    (into {}
          (map
-          (juxt keyfn valfn)
-          coll))))
+           (juxt keyfn valfn)
+           coll))))
 
 (defn events-by-node [events]
   (generate-map #(get-triggered-events % events) (get-all-nodes events)))
@@ -140,27 +140,61 @@
 
 (defn run-events [doc-old changes event-map]
   (reduce
-   (fn [acc [node value]]
-     (println node value (assoc acc node value))
-     (let [{:keys [events]} (event-map node)]
-       (reduce
-        (fn [doc-evs {i :inputs o :outputs h :handler}]
-          (println doc-evs)
-          (->> (h nil (map (partial get doc-evs) i) (map (partial get doc-evs) o))
-               tee
-               (zipmap o)
-               tee
-               (merge doc-evs)
-               tee))
-        (assoc acc node value)
-        events)))
-   doc-old
-   changes))
-#_
-[[:title {:validation ..}]
- [:user {:id :user}
-  [:first-name {:id :fname}]
-  [:last-name {:id :lname}]]]
+    (fn [acc [node value]]
+      (println node value (assoc acc node value))
+      (let [{:keys [events]} (event-map node)]
+        (reduce
+          (fn [doc-evs {i :inputs o :outputs h :handler}]
+            (println doc-evs)
+            (->> (h nil (map (partial get doc-evs) i) (map (partial get doc-evs) o))
+                 tee
+                 (zipmap o)
+                 tee
+                 (merge doc-evs)
+                 tee))
+          (assoc acc node value)
+          events)))
+    doc-old
+    changes))
+
+(def model
+  [[:title {:validation []}]
+   [:user {:id :user}
+    [:first-name {:id :fname}]
+    [:last-name {:id :lname}]
+    [:profile {}
+     [:address {:id :address}
+      [:street {}]
+      [:city {:id :city}]]]]])
+
+
+#_(defn paths-by-id [root]
+    (tree-seq
+      (fn [node]
+        (and (vector? node)
+             (keyword? (first node))
+             (map? (second node))))
+      (partial drop 2)
+      root))
+
+(defn paths-by-id
+  ([root] (paths-by-id {} [] root))
+  ([mapped-paths path [segment opts & children]]
+   (if segment
+     (let [path         (conj path segment)
+           mapped-paths (if-let [id (:id opts)]
+                          (assoc mapped-paths id path)
+                          mapped-paths)]
+       (if-not (empty? children)
+         (apply merge (map (partial paths-by-id mapped-paths path) children))
+         mapped-paths))
+     mapped-paths)))
+
+(defn model->paths [model]
+  (apply merge (map paths-by-id model)))
+
+(model->paths model)
+
 
 
 (defn add-nodes
@@ -200,51 +234,50 @@
 (defn gen-graph
   [events]
   (reduce
-   (fn [g {i :inputs o :outputs}]
-     (merge-with
-      clojure.set/union
-      g
-      (zipmap i (repeat (set o)))))
-   {}
-   events))
+    (fn [g {i :inputs o :outputs}]
+      (merge-with
+        clojure.set/union
+        g
+        (zipmap i (repeat (set o)))))
+    {}
+    events))
 
 (defn reverse-edge-direction
   [graph]
   (reduce-kv
-   (fn [inverted i o]
-     (merge-with
-      clojure.set/union
-      inverted
-      (zipmap o (repeat #{i}))))
-   {}
-   graph))
+    (fn [inverted i o]
+      (merge-with
+        clojure.set/union
+        inverted
+        (zipmap o (repeat #{i}))))
+    {}
+    graph))
 
 (defn gen-ev-graph
   [events]
   (reduce
-   (fn [g {i :inputs o :outputs h :handler :as ev}]
-     (merge-with
-      clojure.set/union
-      g
-      (zipmap i (repeat #{(assoc ev :relationship :input :connections (set o))}))
-      (zipmap o (repeat #{(assoc ev :relationship :output :connections (set i))}))))
-   {}
-   events))
+    (fn [g {i :inputs o :outputs h :handler :as ev}]
+      (merge-with
+        clojure.set/union
+        g
+        (zipmap i (repeat #{(assoc ev :relationship :input :connections (set o))}))
+        (zipmap o (repeat #{(assoc ev :relationship :output :connections (set i))}))))
+    {}
+    events))
 
 (defn traversed-edges [origin graph get-related-nodes]
-  (let [edges (get graph origin #{})
+  (let [edges         (get graph origin #{})
         related-nodes (filter (partial contains? graph) (disj (reduce clojure.set/union #{} (map get-related-nodes edges)) origin))]
     (println origin related-nodes)
     (apply clojure.set/union edges (map #(traversed-edges % (dissoc graph origin) get-related-nodes) related-nodes))))
 
-#_
-(defn subgraphs [graph get-related-nodes]
-  (reduce
-   (fn [sgs sg]
-     )
-   (mapv
-    (fn [[n es]] (apply clojure.set/union #{n} (map get-related-nodes es)))
-    graph)))
+#_(defn subgraphs [graph get-related-nodes]
+    (reduce
+      (fn [sgs sg]
+        )
+      (mapv
+        (fn [[n es]] (apply clojure.set/union #{n} (map get-related-nodes es)))
+        graph)))
 
 (comment
 
