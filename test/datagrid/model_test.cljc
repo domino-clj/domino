@@ -1,6 +1,8 @@
 (ns datagrid.model-test
   (:require
     [datagrid.model :refer :all]
+    #?(:clj  [clojure.test :refer :all]
+       :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
     [clojure.test :refer :all]))
 
 (deftest model-parse-test

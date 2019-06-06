@@ -6,7 +6,7 @@
   :dependencies
   [[org.clojure/clojure "1.10.0" :scope "provided"]
    [org.clojure/clojurescript "1.10.520" :scope "provided"]
-   [hoplon/javelin "3.9.0"]]
+   [reagent "0.8.1"]]
 
   :plugins
   [[lein-cljsbuild "1.1.7"]
@@ -35,7 +35,6 @@
      [binaryage/devtools "0.9.10"]
      [cider/piggieback "0.4.0"]
      [figwheel-sidecar "0.5.18"]
-     [reagent "0.8.1"]
      [cheshire "5.8.1"]]
 
     :source-paths ["src/clj" "src/cljc" "src/cljs" "env/dev/clj" "env/dev/cljs"]

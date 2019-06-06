@@ -35,6 +35,10 @@ Datagrid is a monorepo with several sub-projects.
   [:last-name {:id :lname}]]]
 ```
 
+#### Reactive Atom
+
+With cljs we piggyback off of reagent's ratom. For the back end, we have to implement our own.
+
 ### event engine
 
 The event engine requires a model definition
