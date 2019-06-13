@@ -1,5 +1,6 @@
 (ns datagrid.graph
-  (:require [clojure.string :as string]))
+  (:require [clojure.string :as string]
+            [clojure.set]))
 
 (def weight
   [{:name    :foo
@@ -246,9 +247,8 @@
                          #{}
                          (map :connections edges))
                         origin))]
-    (println origin edges related-nodes)
     (apply clojure.set/union
-           (set (map :edge edges))
+           (set edges)
            (map
             #(traversed-edges
               %
@@ -256,14 +256,22 @@
               edge-filter)
             related-nodes))))
 
+(defn connected-nodes-map [graph edge-filter]
+  (->> graph
+       keys
+       (map
+        (juxt identity
+              #(->> (traversed-edges % graph edge-filter)
+                    (map :connections)
+                    (apply clojure.set/union))))
+       (into {})))
 
-#_(defn subgraphs [graph get-related-nodes]
-    (reduce
-      (fn [sgs sg]
-        )
-      (mapv
-        (fn [[n es]] (apply clojure.set/union #{n} (map get-related-nodes es)))
-        graph)))
+(defn subgraphs [graph]
+  (->> (connected-nodes-map graph (constantly true))
+       vals
+       distinct
+       (remove empty?)
+       (map #(select-keys graph %))))
 
 (comment
 
