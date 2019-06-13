@@ -5,6 +5,16 @@
   [{:name    :foo
     :inputs  [:foo]
     :outputs [:bar]}
+   {:name    :bar
+    :inputs  [:bar]
+    :outputs [:baz]}
+   {:name    :baz
+    :inputs  [:baz]
+    :outputs [:foo]}
+   {:name    :baz
+    :inputs  [:baz]
+    :outputs [:a]}
+
    {:name    :kg->lb
     :inputs  [:kg]
     :outputs [:lb]
@@ -17,7 +27,7 @@
                 [(/ lb 2.2)])}
    {:name    :kg->bmi
     :outputs [:bmi]
-    :inputs  [:kg]}])
+    :inputs  [:kg :height]}])
 
 (def events
   [{:inputs  [:a :b]
@@ -220,16 +230,32 @@
       (merge-with
         clojure.set/union
         g
-        (zipmap i (repeat #{(assoc ev :relationship :input :connections (set o))}))
-        (zipmap o (repeat #{(assoc ev :relationship :output :connections (set i))}))))
+        (zipmap i (repeat #{{:edge ev :relationship :input :connections (set o)}}))
+        (zipmap o (repeat #{{:edge ev :relationship :output :connections (set i)}}))))
     {}
     events))
 
-(defn traversed-edges [origin graph get-related-nodes]
-  (let [edges         (get graph origin #{})
-        related-nodes (filter (partial contains? graph) (disj (reduce clojure.set/union #{} (map get-related-nodes edges)) origin))]
-    (println origin related-nodes)
-    (apply clojure.set/union edges (map #(traversed-edges % (dissoc graph origin) get-related-nodes) related-nodes))))
+
+(defn traversed-edges [origin graph edge-filter]
+  (let [edges         (filter edge-filter (get graph origin #{}))
+        related-nodes (filter
+                       (partial contains? graph)
+                       (disj
+                        (reduce
+                         clojure.set/union
+                         #{}
+                         (map :connections edges))
+                        origin))]
+    (println origin edges related-nodes)
+    (apply clojure.set/union
+           (set (map :edge edges))
+           (map
+            #(traversed-edges
+              %
+              (dissoc graph origin)
+              edge-filter)
+            related-nodes))))
+
 
 #_(defn subgraphs [graph get-related-nodes]
     (reduce
