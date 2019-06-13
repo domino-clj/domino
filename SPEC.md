@@ -123,6 +123,8 @@ When the value of a path in the model's map is changed, the event engine execute
 1. Generate the dependency graph of events that have that path as an input
 2. Sequentially (TODO: synchronously or not? Presumably synchronously due to nature of dependencies) execute the `handler` for each event
 
+If a no op / no change to any values then no events and effects are triggered.
+
 #### Dependency graph
 
 The dependency graph is generated from inputs and outputs. If an event has an output path that is used in inputs for other events, it is meant to propagate, and so the graph continues.

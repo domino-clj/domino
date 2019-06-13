@@ -12,10 +12,5 @@
 ;; Implement a reactive atom. How hard could it possibly be :D
 
 (def atom
-  #?(:clj clojure.core/atom
+  #?(:clj  clojure.core/atom
      :cljs reagent/atom))
-
-(defn cursor
-  [src path]
-  #?(:clj nil
-     :cljs (cursor src path)))
