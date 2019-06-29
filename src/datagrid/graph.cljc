@@ -1,101 +1,6 @@
 (ns datagrid.graph
-  (:require [clojure.string :as string]
-            [clojure.set]))
-
-(def weight
-  [{:name    :foo
-    :inputs  [:foo]
-    :outputs [:bar]}
-   {:name    :bar
-    :inputs  [:bar]
-    :outputs [:baz]}
-   {:name    :baz
-    :inputs  [:baz]
-    :outputs [:foo]}
-   {:name    :baz
-    :inputs  [:baz]
-    :outputs [:a]}
-
-   {:name    :kg->lb
-    :inputs  [:kg]
-    :outputs [:lb]
-    :handler '(fn [_ [kg] [_]]
-                [(* kg 2.2)])}
-   {:name    :lb->kg
-    :outputs [:kg]
-    :inputs  [:lb]
-    :handler '(fn [_ [lb] [_]]
-                [(/ lb 2.2)])}
-   {:name    :kg->bmi
-    :outputs [:bmi]
-    :inputs  [:kg :height]}])
-
-(def events
-  [{:inputs  [:a :b]
-    :outputs [:c]
-    :handler (fn [ctx [a b] [c]]
-               [c])}
-   {:inputs  [:c]
-    :outputs [:d :e]
-    :handler (fn [ctx [a b] [d e]]
-               [d e])}
-   {:inputs  [:g]
-    :outputs [:h]
-    :handler (fn [ctx [c g] [h]]
-               [h])}
-   {:inputs  [:d]
-    :outputs [:f]
-    :handler (fn [ctx [c d] [f]]
-               [f])}])
-
-(def events1
-  [{:inputs  [:a]
-    :outputs [:b]
-    :handler (fn [ctx [a] [b]]
-               [b])}
-   {:inputs  [:b]
-    :outputs [:a]
-    :handler (fn [ctx [b] [a]]
-               [a])}
-   {:inputs  [:b]
-    :outputs [:c]
-    :handler (fn [ctx [b] [a]]
-               [a])}])
-
-(def events2
-  [{:inputs  [:a]
-    :outputs [:b :c]
-    #_#_:handler (fn [ctx [a] [b]]
-                   [b])}
-   {:inputs  [:b]
-    :outputs [:a]
-    #_#_:handler (fn [ctx [b] [a]]
-                   [a])}
-   {:inputs  [:b]
-    :outputs [:c]
-    #_#_:handler (fn [ctx [b] [a]]
-                   [a])}
-   {:inputs  [:c]
-    :outputs [:d]
-    #_#_:handler (fn [ctx [b] [a]]
-                   [a])}
-
-   {:inputs  [:d :a :g]
-    :outputs [:e]
-    #_#_:handler (fn [ctx [b] [a]]
-                   [a])}])
-
-(def events3
-  [{:inputs  [:a]
-    :outputs [:a :b]}
-   {:inputs  [:b]
-    :outputs [:b :a]}])
-
-(def events4
-  [{:inputs  []
-    :outputs []}
-   {:inputs  [:a]
-    :outputs [:b]}])
+  (:require
+    [clojure.set]))
 
 (def conj-set (fnil conj #{}))
 
@@ -145,10 +50,6 @@
 (defn events-by-node [events]
   (generate-map #(get-triggered-events % events) (get-all-nodes events)))
 
-(defn tee [o]
-  (println o)
-  o)
-
 (defn run-events [doc-old changes event-map]
   (reduce
     (fn [acc [node value]]
@@ -158,11 +59,8 @@
           (fn [doc-evs {i :inputs o :outputs h :handler}]
             (println doc-evs)
             (->> (h nil (map (partial get doc-evs) i) (map (partial get doc-evs) o))
-                 tee
                  (zipmap o)
-                 tee
-                 (merge doc-evs)
-                 tee))
+                 (merge doc-evs)))
           (assoc acc node value)
           events)))
     doc-old
@@ -189,7 +87,6 @@
   [events]
   (distinct (mapcat :inputs events)))
 
-
 (defn connect
   "Generates a graph (i.e. input-kw->node-list) from a vector of nodes (i.e. {:inputs [...] :outputs [...] :handler (fn [ctx inputs outputs])}) "
   ([nodes]
@@ -200,7 +97,6 @@
      (if (not-empty inputs)
        (recur ctx (remove #(some #{%} visited) inputs))
        graph))))
-
 
 (defn gen-graph
   [events]
@@ -236,34 +132,33 @@
     {}
     events))
 
-
 (defn traversed-edges [origin graph edge-filter]
   (let [edges         (filter edge-filter (get graph origin #{}))
         related-nodes (filter
-                       (partial contains? graph)
-                       (disj
-                        (reduce
-                         clojure.set/union
-                         #{}
-                         (map :connections edges))
-                        origin))]
+                        (partial contains? graph)
+                        (disj
+                          (reduce
+                            clojure.set/union
+                            #{}
+                            (map :connections edges))
+                          origin))]
     (apply clojure.set/union
            (set edges)
            (map
-            #(traversed-edges
-              %
-              (dissoc graph origin)
-              edge-filter)
-            related-nodes))))
+             #(traversed-edges
+                %
+                (dissoc graph origin)
+                edge-filter)
+             related-nodes))))
 
 (defn connected-nodes-map [graph edge-filter]
   (->> graph
        keys
        (map
-        (juxt identity
-              #(->> (traversed-edges % graph edge-filter)
-                    (map :connections)
-                    (apply clojure.set/union))))
+         (juxt identity
+               #(->> (traversed-edges % graph edge-filter)
+                     (map :connections)
+                     (apply clojure.set/union))))
        (into {})))
 
 (defn subgraphs [graph]

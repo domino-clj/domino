@@ -1,5 +1,4 @@
-(ns datagrid.model
-  (:require [datagrid.reactive-atom :as ratom]))
+(ns datagrid.model)
 
 (defn paths-by-id
   ([root] (paths-by-id {} [] root))
@@ -17,9 +16,3 @@
 (defn model->paths [model]
   (apply merge (map paths-by-id model)))
 
-(def test-id-paths
-  {:user    {:path [:user]}
-   :fname   [:user :first-name]
-   :lname   [:user :last-name]
-   :address [:user :profile :address]
-   :city    [:user :profile :address :city]})

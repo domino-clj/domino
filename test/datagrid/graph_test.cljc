@@ -86,3 +86,101 @@
     (is (= {:b #{}}                                         ;; TODO: verify intent. Maybe throw exception
            (graph/connect (graph/base-graph-ctx {}) [:b]))))
   )
+
+
+;;; graphs
+
+(def weight
+  [{:name    :foo
+    :inputs  [:foo]
+    :outputs [:bar]}
+   {:name    :bar
+    :inputs  [:bar]
+    :outputs [:baz]}
+   {:name    :baz
+    :inputs  [:baz]
+    :outputs [:foo]}
+   {:name    :baz
+    :inputs  [:baz]
+    :outputs [:a]}
+
+   {:name    :kg->lb
+    :inputs  [:kg]
+    :outputs [:lb]
+    :handler '(fn [_ [kg] [_]]
+                [(* kg 2.2)])}
+   {:name    :lb->kg
+    :outputs [:kg]
+    :inputs  [:lb]
+    :handler '(fn [_ [lb] [_]]
+                [(/ lb 2.2)])}
+   {:name    :kg->bmi
+    :outputs [:bmi]
+    :inputs  [:kg :height]}])
+
+(def events
+  [{:inputs  [:a :b]
+    :outputs [:c]
+    :handler (fn [ctx [a b] [c]]
+               [c])}
+   {:inputs  [:c]
+    :outputs [:d :e]
+    :handler (fn [ctx [a b] [d e]]
+               [d e])}
+   {:inputs  [:g]
+    :outputs [:h]
+    :handler (fn [ctx [c g] [h]]
+               [h])}
+   {:inputs  [:d]
+    :outputs [:f]
+    :handler (fn [ctx [c d] [f]]
+               [f])}])
+
+(def events1
+  [{:inputs  [:a]
+    :outputs [:b]
+    :handler (fn [ctx [a] [b]]
+               [b])}
+   {:inputs  [:b]
+    :outputs [:a]
+    :handler (fn [ctx [b] [a]]
+               [a])}
+   {:inputs  [:b]
+    :outputs [:c]
+    :handler (fn [ctx [b] [a]]
+               [a])}])
+
+(def events2
+  [{:inputs  [:a]
+    :outputs [:b :c]
+    #_#_:handler (fn [ctx [a] [b]]
+                   [b])}
+   {:inputs  [:b]
+    :outputs [:a]
+    #_#_:handler (fn [ctx [b] [a]]
+                   [a])}
+   {:inputs  [:b]
+    :outputs [:c]
+    #_#_:handler (fn [ctx [b] [a]]
+                   [a])}
+   {:inputs  [:c]
+    :outputs [:d]
+    #_#_:handler (fn [ctx [b] [a]]
+                   [a])}
+
+   {:inputs  [:d :a :g]
+    :outputs [:e]
+    #_#_:handler (fn [ctx [b] [a]]
+                   [a])}])
+
+(def events3
+  [{:inputs  [:a]
+    :outputs [:a :b]}
+   {:inputs  [:b]
+    :outputs [:b :a]}])
+
+(def events4
+  [{:inputs  []
+    :outputs []}
+   {:inputs  [:a]
+    :outputs [:b]}])
