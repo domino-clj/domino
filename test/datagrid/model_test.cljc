@@ -19,5 +19,20 @@
             :lname   [:user :last-name],
             :address [:user :profile :address],
             :city    [:user :profile :address :city]}
-           (model->paths model)))))
+           (:id->path (model->paths model))))))
+
+(deftest id-lookup-test
+  (let [model [[:title {:validation []}]
+               [:user {:id :user}
+                [:first-name {:id :fname}]
+                [:last-name {:id :lname}]
+                [:profile {}
+                 [:address {:id :address}
+                  [:street {}]
+                  [:city {:id :city}]]]]]
+        ctx (model->paths model)]
+
+    (is (= :fname (path-for-id ctx [:user :first-name])))
+    (is (= :address (path-for-id ctx [:user :profile :address :street])))
+    (is (nil? (path-for-id ctx [:profile :address :street])))))
 

@@ -170,10 +170,40 @@
 
 (comment
 
-  (connect events2)
+  (def events
+    [{:inputs  [:a]
+      :outputs [:b :c]
+      :handler (fn [ctx [a] [b]]
+                 [b])}
+     {:inputs  [:b]
+      :outputs [:a]
+      :handler (fn [ctx [b] [a]]
+                 [a])}
+     {:inputs  [:b]
+      :outputs [:d]
+      :handler (fn [ctx [b] [a]]
+                 [a])}
+     {:inputs  [:c]
+      :outputs [:d]
+      :handler (fn [ctx [b] [a]]
+                 [a])}
 
-  (connect events1)
+     {:inputs  [:d :a :g]
+      :outputs [:e]
+      :handler (fn [ctx [b] [a]]
+                 [a])}])
 
-  (-> (add-nodes {:nodes events1 :graph {}} [:a]) first :visited)
+  (connect events)
+
+  (:a (gen-ev-graph events))
+
+
+  (defn execute [graph inputs]
+    (reduce
+      (fn [results [path value]]
+        )))
+
+
+
 
   )
