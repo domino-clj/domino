@@ -32,7 +32,7 @@
                   [:city {:id :city}]]]]]
         ctx (model->paths model)]
 
-    (is (= :fname (path-for-id ctx [:user :first-name])))
-    (is (= :address (path-for-id ctx [:user :profile :address :street])))
-    (is (nil? (path-for-id ctx [:profile :address :street])))))
+    (is (= :fname (id-for-path ctx [:user :first-name])))
+    (is (= :address (id-for-path ctx [:user :profile :address :street])))
+    (is (nil? (id-for-path ctx [:profile :address :street])))))
 

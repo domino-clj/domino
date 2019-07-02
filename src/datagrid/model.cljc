@@ -20,7 +20,7 @@
     {:id->path id->path
      :path->id (map-invert id->path)}))
 
-(defn path-for-id [{:keys [path->id]} path]
+(defn id-for-path [{:keys [path->id]} path]
   (loop [path-segment path]
     (when-not (empty? path-segment)
       (if-let [id (get path->id path-segment)]

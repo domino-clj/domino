@@ -1,6 +1,7 @@
 (ns datagrid.graph
   (:require
-    [clojure.set]))
+    [clojure.set]
+    [datagrid.model :as model]))
 
 (def conj-set (fnil conj #{}))
 
