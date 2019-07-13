@@ -169,42 +169,86 @@
        (remove empty?)
        (map #(select-keys graph %))))
 
+
+;;;
+(defn execute-event [ctx db {{:keys [inputs outputs handler]} :edge}]
+  (let [results (vec
+                  (handler
+                    ctx
+                    (mapv #(get-in db %) inputs)
+                    (mapv #(get-in db %) outputs)))
+        outputs (vec outputs)]
+    (when-not (= (count outputs) (count results))
+      (throw
+        (ex-info "number of outputs returned by the handler must match the number of declared outputs"
+                 {:outputs outputs
+                  :results results})))
+    (println (count outputs) outputs "\n" (count results) results)
+    (reduce
+      (fn [db idx]
+        (assoc-in db (outputs idx) (results idx)))
+      db
+      (range (count outputs)))))
+
+(defn execute-events [ctx db events [path value]]
+  (reduce
+    (fn [db event]
+      (execute-event ctx db event))
+    (assoc-in db path value)
+    events))
+
+(defn execute [ctx db graph inputs]
+  (reduce
+    (fn [db [path :as input]]
+      (let [events (get graph path)]
+        (execute-events ctx db events input)))
+    db
+    inputs))
+
 (comment
 
-  (def events
-    [{:inputs  [:a]
-      :outputs [:b :c]
-      :handler (fn [ctx [a] [b]]
-                 [b])}
-     {:inputs  [:b]
-      :outputs [:a]
-      :handler (fn [ctx [b] [a]]
-                 [a])}
-     {:inputs  [:b]
-      :outputs [:d]
-      :handler (fn [ctx [b] [a]]
-                 [a])}
-     {:inputs  [:c]
-      :outputs [:d]
-      :handler (fn [ctx [b] [a]]
-                 [a])}
+  (execute-event
+    {}
+    {:foo {:bar 1}}
+    {:edge
+     {:inputs  [[:foo :bar]]
+      :outputs [[:baz]]
+      :handler (fn [ctx [bar] [baz]] [(inc bar)])}})
 
-     {:inputs  [:d :a :g]
-      :outputs [:e]
-      :handler (fn [ctx [b] [a]]
-                 [a])}])
+  (execute-events
+    {}
+    {:foo {:bar 1}}
+    [{:edge
+      {:inputs  [[:foo :bar]]
+       :outputs [[:baz]]
+       :handler (fn [ctx [bar] [baz]] [(inc bar)])}}]
+    [[:foo :bar] 5])
+
+  (def events
+    [{:inputs  [[:a]]
+      :outputs [[:b] [:c]]
+      :handler (fn [ctx [a] [b c]] [(inc b) c])}
+     {:inputs  [[:b]]
+      :outputs [[:a]]
+      :handler (fn [ctx [b] [a]] [(inc a)])}
+     {:inputs  [[:b]]
+      :outputs [[:d]]
+      :handler (fn [ctx [b] [a]] [(inc a)])}
+     {:inputs  [[:c]]
+      :outputs [[:d]]
+      :handler (fn [ctx [b] [a]] [(inc a)])}
+     {:inputs  [[:d] [:a] [:g]]
+      :outputs [[:e]]
+      :handler (fn [ctx [d a g] [e]] [(+ d a g)])}])
 
   (connect events)
 
-  (:a (gen-ev-graph events))
+  (get (gen-ev-graph events) [:a])
 
-
-  (defn execute [graph inputs]
-    (reduce
-      (fn [results [path value]]
-        )))
-
-
-
+  (execute
+    {}
+    {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}
+    (gen-ev-graph events)
+    [[[:a] 1]])
 
   )
