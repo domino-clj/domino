@@ -194,7 +194,16 @@
             (keep (fn [[path old new]] (when (not= old new) path))))
       output-paths old-outputs new-outputs))
 
-(defn ctx-updater [edges {::keys [db] :as ctx}]
+(defn ctx-updater
+  "Reducer that updates context with new values updated in ctx from
+  handler of each edge. New values are only stored when they are different
+  from old values.
+
+  In changed cases, the following keys are updated:
+  ::changed-paths => queue of affected paths
+  ::db => temporary relevant db within context
+  ::changes => key-value pair of path and new"
+  [edges {::keys [db] :as ctx}]
   (reduce
     (fn [ctx {{:keys [inputs outputs handler]} :edge}]
 
@@ -207,14 +216,17 @@
             (if (not= old new)
               (-> ctx
                   (update ::changed-paths (fnil conj empty-queue) path)
-                  (update ::db assoc-in path new))
+                  (update ::db assoc-in path new)
+                  (update ::changes assoc path new))
               ctx))
           ctx
           (map vector outputs old-outputs new-outputs))))
     ctx
     edges))
 
+;; TODO: make multi-arity where no origin provided
 (defn eval-traversed-edges
+  "Given an origin and graph, update context with edges"
   [ctx origin graph]
   (let [edges          (filter input? (get graph origin #{}))
         removed-origin (dissoc graph origin)
