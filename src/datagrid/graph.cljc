@@ -89,7 +89,8 @@
   (distinct (mapcat :inputs events)))
 
 (defn connect
-  "Generates a graph (i.e. input-kw->node-list) from a vector of nodes (i.e. {:inputs [...] :outputs [...] :handler (fn [ctx inputs outputs])}) "
+  "Generates a graph (i.e. input-kw->node-list) from a vector of nodes
+  (i.e. {:inputs [...] :outputs [...] :handler (fn [ctx inputs outputs])}) "
   ([nodes]
    (connect (base-graph-ctx nodes)
             (input-nodes nodes)))
@@ -171,22 +172,73 @@
 
 
 ;;;
+(defn input? [edge]
+  (= :input (:relationship edge)))
+
+(defn get-db-paths [db paths]
+  (map #(get-in db %) paths))
+
+(def empty-queue
+  #?(:clj  clojure.lang.PersistentQueue/EMPTY
+     :cljs cljs.core.PersistentQueue/EMPTY))
+
+#?(:clj
+   (defmethod clojure.core/print-method clojure.lang.PersistentQueue
+     [queue writer]
+     (.write writer
+             (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
+
+#_(defn changed-output-paths [output-paths old-outputs new-outputs]
+    (sequence
+      (comp (map vector)
+            (keep (fn [[path old new]] (when (not= old new) path))))
+      output-paths old-outputs new-outputs))
+
+(defn ctx-updater [edges {::keys [db] :as ctx}]
+  (reduce
+    (fn [ctx {{:keys [inputs outputs handler]} :edge}]
+
+      (let [old-outputs (get-db-paths db outputs)
+            new-outputs (handler ctx
+                                 (get-db-paths db inputs)
+                                 old-outputs)]
+        (reduce
+          (fn [ctx [path old new]]
+            (if (not= old new)
+              (-> ctx
+                  (update ::changed-paths (fnil conj empty-queue) path)
+                  (update ::db assoc-in path new))
+              ctx))
+          ctx
+          (map vector outputs old-outputs new-outputs))))
+    ctx
+    edges))
+
+(defn eval-traversed-edges
+  [ctx origin graph]
+  (let [edges          (filter input? (get graph origin #{}))
+        removed-origin (dissoc graph origin)
+        {::keys [changed-paths] :as new-ctx} (ctx-updater edges ctx)
+        x              (peek changed-paths)
+        xs             (pop changed-paths)]                 ;; consider making multi-arity eval-traversed-edges with xs
+    (if x
+      (recur (assoc new-ctx ::changed-paths xs) x removed-origin)
+      new-ctx)))
+
 (defn execute-event [ctx db {{:keys [inputs outputs handler]} :edge}]
   (let [results (vec
                   (handler
                     ctx
                     (mapv #(get-in db %) inputs)
-                    (mapv #(get-in db %) outputs)))
-        outputs (vec outputs)]
+                    (mapv #(get-in db %) outputs)))]
     (when-not (= (count outputs) (count results))
       (throw
         (ex-info "number of outputs returned by the handler must match the number of declared outputs"
                  {:outputs outputs
                   :results results})))
-    (println (count outputs) outputs "\n" (count results) results)
     (reduce
       (fn [db idx]
-        (assoc-in db (outputs idx) (results idx)))
+        (assoc-in db (nth outputs idx) (nth results idx)))
       db
       (range (count outputs)))))
 
@@ -200,8 +252,8 @@
 (defn execute [ctx db graph inputs]
   (reduce
     (fn [db [path :as input]]
-      (let [events (get graph path)]
-        (execute-events ctx db events input)))
+      (let [events (traversed-edges path graph input?)]
+        (execute-events (assoc ctx ::db db) db events input)))
     db
     inputs))
 
@@ -251,4 +303,9 @@
     (gen-ev-graph events)
     [[[:a] 1]])
 
+
+  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} [] (gen-ev-graph events))
+  ;=> #:datagrid.graph{:db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0}}
+  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} [:a] (gen-ev-graph events))
+  ;=> #:datagrid.graph{:db {:a 1, :b 1, :c 0, :d 1, :e 2, :f 0, :g 0}, :changed-paths #<PersistentQueue: []>}
   )
