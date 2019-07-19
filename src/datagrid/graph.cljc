@@ -188,12 +188,6 @@
      (.write writer
              (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
-#_(defn changed-output-paths [output-paths old-outputs new-outputs]
-    (sequence
-      (comp (map vector)
-            (keep (fn [[path old new]] (when (not= old new) path))))
-      output-paths old-outputs new-outputs))
-
 (defn ctx-updater
   "Reducer that updates context with new values updated in ctx from
   handler of each edge. New values are only stored when they are different
@@ -211,6 +205,11 @@
             new-outputs (handler ctx
                                  (get-db-paths db inputs)
                                  old-outputs)]
+        (when-not (= (count outputs) (count new-outputs))
+          (throw
+            (ex-info "number of outputs returned by the handler must match the number of declared outputs"
+                     {:declared-outputs outputs
+                      :outputs          new-outputs})))
         (reduce
           (fn [ctx [path old new]]
             (if (not= old new)
@@ -224,48 +223,28 @@
     ctx
     edges))
 
-;; TODO: make multi-arity where no origin provided
 (defn eval-traversed-edges
   "Given an origin and graph, update context with edges"
-  [ctx origin graph]
-  (let [edges          (filter input? (get graph origin #{}))
-        removed-origin (dissoc graph origin)
-        {::keys [changed-paths] :as new-ctx} (ctx-updater edges ctx)
-        x              (peek changed-paths)
-        xs             (pop changed-paths)]                 ;; consider making multi-arity eval-traversed-edges with xs
-    (if x
-      (recur (assoc new-ctx ::changed-paths xs) x removed-origin)
-      new-ctx)))
-
-(defn execute-event [ctx db {{:keys [inputs outputs handler]} :edge}]
-  (let [results (vec
-                  (handler
-                    ctx
-                    (mapv #(get-in db %) inputs)
-                    (mapv #(get-in db %) outputs)))]
-    (when-not (= (count outputs) (count results))
-      (throw
-        (ex-info "number of outputs returned by the handler must match the number of declared outputs"
-                 {:outputs outputs
-                  :results results})))
-    (reduce
-      (fn [db idx]
-        (assoc-in db (nth outputs idx) (nth results idx)))
-      db
-      (range (count outputs)))))
-
-(defn execute-events [ctx db events [path value]]
-  (reduce
-    (fn [db event]
-      (execute-event ctx db event))
-    (assoc-in db path value)
-    events))
+  ([{::keys [changed-paths] :as ctx} graph]
+   (let [x  (peek changed-paths)
+         xs (pop changed-paths)]
+     (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
+  ([ctx graph origin]
+   (let [edges          (filter input? (get graph origin #{}))
+         removed-origin (dissoc graph origin)
+         {::keys [changed-paths] :as new-ctx} (if (not-empty edges)
+                                                (ctx-updater edges ctx)
+                                                ctx)
+         x              (peek changed-paths)
+         xs             (pop changed-paths)]
+     (if x
+       (recur (assoc new-ctx ::changed-paths xs) x removed-origin)
+       new-ctx))))
 
 (defn execute [ctx db graph inputs]
   (reduce
-    (fn [db [path :as input]]
-      (let [events (traversed-edges path graph input?)]
-        (execute-events (assoc ctx ::db db) db events input)))
+    (fn [db [path value]]
+      (eval-traversed-edges (assoc ctx ::db (assoc-in db path value)) path graph))
     db
     inputs))
 
