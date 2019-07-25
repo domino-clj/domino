@@ -1,6 +1,6 @@
 (ns datagrid.graph
   (:require
-    [clojure.set]
+    [clojure.set :refer [union]]
     [datagrid.model :as model]))
 
 (def conj-set (fnil conj #{}))
@@ -105,7 +105,7 @@
   (reduce
     (fn [g {i :inputs o :outputs}]
       (merge-with
-        clojure.set/union
+        union
         g
         (zipmap i (repeat (set o)))))
     {}
@@ -116,7 +116,7 @@
   (reduce-kv
     (fn [inverted i o]
       (merge-with
-        clojure.set/union
+        union
         inverted
         (zipmap o (repeat #{i}))))
     {}
@@ -127,7 +127,7 @@
   (reduce
     (fn [g {i :inputs o :outputs h :handler :as ev}]
       (merge-with
-        clojure.set/union
+        union
         g
         (zipmap i (repeat #{{:edge ev :relationship :input :connections (set o)}}))
         (zipmap o (repeat #{{:edge ev :relationship :output :connections (set i)}}))))
@@ -140,11 +140,11 @@
                         (partial contains? graph)
                         (disj
                           (reduce
-                            clojure.set/union
+                            union
                             #{}
                             (map :connections edges))
                           origin))]
-    (apply clojure.set/union
+    (apply union
            (set edges)
            (map
              #(traversed-edges
@@ -160,7 +160,7 @@
          (juxt identity
                #(->> (traversed-edges % graph edge-filter)
                      (map :connections)
-                     (apply clojure.set/union))))
+                     (apply union))))
        (into {})))
 
 (defn subgraphs [graph]
@@ -299,4 +299,5 @@
   ;=> #:datagrid.graph{:db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0}}
   (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} [:a] (gen-ev-graph events))
   ;=> #:datagrid.graph{:db {:a 1, :b 1, :c 0, :d 1, :e 2, :f 0, :g 0}, :changed-paths #<PersistentQueue: []>}
+
   )
