@@ -23,6 +23,7 @@
                  (remove #(= input-node %) inputs))))
        (apply concat)))
 
+;; delete?
 (defn get-triggered-events
   [input-node events]
   (-> events
@@ -39,6 +40,7 @@
            :inputs #{}}))
       (update :inputs disj input-node)))
 
+;; delete?
 (defn generate-map
   ([valfn coll]
    (generate-map identity valfn coll))
@@ -48,9 +50,11 @@
            (juxt keyfn valfn)
            coll))))
 
+;; delete?
 (defn events-by-node [events]
   (generate-map #(get-triggered-events % events) (get-all-nodes events)))
 
+;; delete?
 (defn run-events [doc-old changes event-map]
   (reduce
     (fn [acc [node value]]
@@ -88,6 +92,7 @@
   [events]
   (distinct (mapcat :inputs events)))
 
+;; delete above here?
 (defn connect
   "Generates a graph (i.e. input-kw->node-list) from a vector of nodes
   (i.e. {:inputs [...] :outputs [...] :handler (fn [ctx inputs outputs])}) "
