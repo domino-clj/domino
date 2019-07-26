@@ -23,6 +23,7 @@
                  (remove #(= input-node %) inputs))))
        (apply concat)))
 
+;; delete?
 (defn get-triggered-events
   [input-node events]
   (-> events
@@ -39,6 +40,7 @@
            :inputs #{}}))
       (update :inputs disj input-node)))
 
+;; delete?
 (defn generate-map
   ([valfn coll]
    (generate-map identity valfn coll))
@@ -48,9 +50,11 @@
            (juxt keyfn valfn)
            coll))))
 
+;; delete?
 (defn events-by-node [events]
   (generate-map #(get-triggered-events % events) (get-all-nodes events)))
 
+;; delete?
 (defn run-events [doc-old changes event-map]
   (reduce
     (fn [acc [node value]]
@@ -88,6 +92,7 @@
   [events]
   (distinct (mapcat :inputs events)))
 
+;; delete above here?
 (defn connect
   "Generates a graph (i.e. input-kw->node-list) from a vector of nodes
   (i.e. {:inputs [...] :outputs [...] :handler (fn [ctx inputs outputs])}) "
@@ -172,9 +177,6 @@
 
 
 ;;;
-(defn input? [edge]
-  (= :input (:relationship edge)))
-
 (defn get-db-paths [db paths]
   (map #(get-in db %) paths))
 
@@ -223,14 +225,25 @@
     ctx
     edges))
 
+(defn input? [edge]
+  (= :input (:relationship edge)))
+
+(defn unchanged-input? [changed-keys edge]
+  (and (input? edge)
+       (not
+         (some (:connections edge) changed-keys))))
+
 (defn eval-traversed-edges
-  "Given an origin and graph, update context with edges"
+  "Given an origin and graph, update context with edges.
+
+  When an node has been visited (as an input), it cannot be considered for an output"
   ([{::keys [changed-paths] :as ctx} graph]
    (let [x  (peek changed-paths)
          xs (pop changed-paths)]
      (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
-  ([ctx graph origin]
-   (let [edges          (filter input? (get graph origin #{}))
+  ([{::keys [changes] :as ctx} graph origin]
+   (let [edges          (filter (partial unchanged-input? (keys changes))
+                                (get graph origin #{}))
          removed-origin (dissoc graph origin)
          {::keys [changed-paths] :as new-ctx} (if (not-empty edges)
                                                 (ctx-updater edges ctx)
@@ -238,14 +251,20 @@
          x              (peek changed-paths)
          xs             (pop changed-paths)]
      (if x
-       (recur (assoc new-ctx ::changed-paths xs) x removed-origin)
+       (recur (assoc new-ctx ::changed-paths xs) removed-origin x)
        new-ctx))))
 
 (defn execute [ctx db graph inputs]
   (reduce
-    (fn [db [path value]]
-      (eval-traversed-edges (assoc ctx ::db (assoc-in db path value)) path graph))
-    db
+    (fn [ctx [path value]]
+      (-> ctx
+          (update ::db assoc-in path value)
+          (update ::changed-paths conj path)
+          (update ::changes assoc path value)
+          (eval-traversed-edges graph)))
+    (assoc ctx ::db db
+               ::changed-paths empty-queue
+               ::changes {})
     inputs))
 
 (comment
@@ -295,9 +314,9 @@
     [[[:a] 1]])
 
 
-  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} [] (gen-ev-graph events))
+  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} (gen-ev-graph events) [])
   ;=> #:datagrid.graph{:db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0}}
-  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} [:a] (gen-ev-graph events))
+  (eval-traversed-edges {::db {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}} (gen-ev-graph events) (conj empty-queue [:a]))
   ;=> #:datagrid.graph{:db {:a 1, :b 1, :c 0, :d 1, :e 2, :f 0, :g 0}, :changed-paths #<PersistentQueue: []>}
 
   )
