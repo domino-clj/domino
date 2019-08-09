@@ -35,7 +35,11 @@
      [binaryage/devtools "0.9.10"]
      [cider/piggieback "0.4.0"]
      [figwheel-sidecar "0.5.18"]
-     [cheshire "5.8.1"]]
+     [cheshire "5.8.1"]
+     [pjstadig/humane-test-output "0.9.0"]]
+
+    :injections [(require 'pjstadig.humane-test-output)
+                 (pjstadig.humane-test-output/activate!)]
 
     :source-paths ["src/clj" "src/cljc" "src/cljs" "env/dev/clj" "env/dev/cljs"]
     :resource-paths ["resources" "env/dev/resources" "target/cljsbuild"]
@@ -73,7 +77,7 @@
                       :pretty-print  true}}}}
     :doo {:build "test"}}}
     :aliases
-    {"test"
+    {#_#_"test"
      ["do"
       ["clean"]
       ["with-profile" "test" "doo" "node" "once"]]
