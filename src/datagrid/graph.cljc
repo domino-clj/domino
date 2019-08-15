@@ -1,7 +1,6 @@
 (ns datagrid.graph
   (:require
-    [clojure.set :refer [union]]
-    [datagrid.model :as model]))
+    [clojure.set :refer [union]]))
 
 (def conj-set (fnil conj #{}))
 
@@ -137,6 +136,12 @@
      (.write writer
              (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
+(defn try-event [{:keys [handler inputs] :as event} ctx db old-outputs]
+  (try
+    (handler ctx (get-db-paths db inputs) old-outputs)
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
+
 (defn ctx-updater
   "Reducer that updates context with new values updated in ctx from
   handler of each edge. New values are only stored when they are different
@@ -153,9 +158,7 @@
         ctx
         (let [ctx         (update ctx ::executed-events conj event)
               old-outputs (get-db-paths db outputs)
-              new-outputs (handler ctx
-                                   (get-db-paths db inputs)
-                                   old-outputs)]
+              new-outputs (try-event event ctx db old-outputs)]
           (when-not (= (count outputs) (count new-outputs))
             (throw
               (ex-info "number of outputs returned by the handler must match the number of declared outputs"
@@ -250,7 +253,7 @@
 
   (try
     (get (gen-ev-graph events) [:a])
-    (catch Exception e
+    (catch #?(:clj Exception :cljs js/Error) e
       (ex-data e)))
 
   (execute
