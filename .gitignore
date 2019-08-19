@@ -3,3 +3,4 @@
 figwheel_server.log
 *.iml
 .nrepl-port
+.lein-failures
