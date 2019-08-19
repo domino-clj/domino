@@ -31,7 +31,6 @@
                                     [:full-name {:id :full-name}]]]
                    :model/effects [{:inputs  [:fname :lname :full-name]
                                     :handler (fn [_ [fname lname full-name]]
-                                               (prn fname lname full-name)
                                                (swap! state assoc
                                                       :first-name fname
                                                       :last-name lname

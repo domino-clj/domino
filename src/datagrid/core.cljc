@@ -39,25 +39,6 @@
      ::effects (effects/effects-by-paths [{:inputs [[:a]] :handler (fn [ctx inputs]
                                                                      (prn inputs))}])})
 
-(defonce state (atom {}))
-(initialize! {:model/model   [[:user {:id :user}
-                                    [:first-name {:id :fname}]
-                                    [:last-name {:id :lname}]
-                                    [:full-name {:id :full-name}]]]
-                   :model/effects [{:inputs  [:fname :lname :full-name]
-                                    :handler (fn [_ [fname lname full-name]]
-                                               (prn fname lname full-name)
-                                               (swap! state assoc
-                                                      :first-name fname
-                                                      :last-name lname
-                                                      :full-name full-name))}]
-                   :model/events  [{:inputs  [:fname :lname]
-                                    :outputs [:full-name]
-                                    :handler (fn [_ [fname lname] _]
-                                               (prn "HELLLO")
-                                               [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]}
-                  {})
-
 (defn pub
   "Take the changes, an ordered collection of changes
 
@@ -69,8 +50,6 @@
      ;#?(:cljs (cljs.pprint/pprint @ctx))
      (effects/execute-effects! updated-ctx)
      updated-ctx)))
-
-(pub [[[:user :first-name] "heeeelp"]])
 
 ;; dereffable
 (defn sub
