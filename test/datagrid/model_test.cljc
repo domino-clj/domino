@@ -1,5 +1,6 @@
 (ns datagrid.model-test
   (:require
+    [datagrid.core :as core]
     [datagrid.graph :as graph]
     [datagrid.model :refer :all]
     #?(:clj  [clojure.test :refer :all]
@@ -46,24 +47,26 @@
                            :outputs [:full-name]
                            :handler (fn [_ [fname lname] _]
                                       [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]
-        connected-events (connect-events model-paths events)]
+        connected-events (connect model-paths events)]
     (is (= {:inputs  [[:user :first-name] [:user :last-name]]
             :outputs [[:user :full-name]]}
            (dissoc (first connected-events) :handler)))
     (is (=
-          {::graph/db              {:user {:first-name "Bob"}}
-           ::graph/changed-paths   graph/empty-queue
-           ::graph/executed-events #{}
-           ::graph/changes         {[:user :first-name] "Bob"}}
-          (graph/execute {} {} (graph/gen-ev-graph events) [[(id->path :fname) "Bob"]])))
+          {::core/db {:user {:first-name "Bob"}}
+           :changes  {[:user :first-name] "Bob"}}
+          (select-keys
+            (graph/execute-events {::core/db {}
+                            ::core/graph     (graph/gen-ev-graph events)}
+                                  [[(id->path :fname) "Bob"]])
+            [::core/db :changes])))
     (is (=
-          {::graph/db              {:user {:first-name "Bob"
-                                           :last-name "Bobberton"}}
-           ::graph/changed-paths   graph/empty-queue
-           ::graph/executed-events #{}
-           ::graph/changes         {[:user :first-name] "Bob" [:user :last-name] "Bobberton"}}
-          (graph/execute {} {} (graph/gen-ev-graph events) [[(id->path :fname) "Bob"]
-                                                            [(id->path :lname) "Bobberton"]])))
-
-    ))
+          {::core/db {:user {:first-name "Bob"
+                             :last-name  "Bobberton"}}
+           :changes  {[:user :first-name] "Bob" [:user :last-name] "Bobberton"}}
+          (select-keys
+            (graph/execute-events {::core/db {}
+                            ::core/graph     (graph/gen-ev-graph events)}
+                                  [[(id->path :fname) "Bob"]
+                            [(id->path :lname) "Bobberton"]])
+            [::core/db :changes])))))
 

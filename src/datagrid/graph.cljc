@@ -128,7 +128,7 @@
 
 (def empty-queue
   #?(:clj  clojure.lang.PersistentQueue/EMPTY
-     :cljs cljs.core.PersistentQueue/EMPTY))
+     :cljs cljs.core/PersistentQueue.EMPTY))
 
 #?(:clj
    (defmethod clojure.core/print-method clojure.lang.PersistentQueue
@@ -198,20 +198,22 @@
        (recur (assoc new-ctx ::changed-paths xs) removed-origin x)
        new-ctx))))
 
-(defn execute [ctx db graph inputs]
-  (eval-traversed-edges
-    (reduce
-      (fn [ctx [path value]]
-        (-> ctx
-            (update ::db assoc-in path value)
-            (update ::changed-paths conj path)
-            (update ::changes assoc path value)))
-      (assoc ctx ::db db
-                 ::changed-paths empty-queue
-                 ::executed-events #{}
-                 ::changes {})
-      inputs)
-    graph))
+(defn execute-events [{:datagrid.core/keys [db graph] :as ctx} inputs]
+  (let [{::keys [db changes]} (eval-traversed-edges
+                                (reduce
+                                  (fn [ctx [path value]]
+                                    (-> ctx
+                                        (update ::db assoc-in path value)
+                                        (update ::changed-paths conj path)
+                                        (update ::changes assoc path value)))
+                                  (assoc ctx ::db db
+                                             ::changed-paths empty-queue
+                                             ::executed-events #{}
+                                             ::changes {})
+                                  inputs)
+                                graph)]
+    (assoc ctx :datagrid.core/db db
+               :changes changes)))
 
 (comment
 
@@ -256,7 +258,7 @@
     (catch #?(:clj Exception :cljs js/Error) e
       (ex-data e)))
 
-  (execute
+  (execute-events
     {}
     {:a 0 :b 0 :c 0 :d 0 :e 0 :f 0 :g 0}
     (gen-ev-graph events)

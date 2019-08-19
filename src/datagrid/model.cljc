@@ -27,7 +27,7 @@
         id
         (recur (butlast path-segment))))))
 
-(defn connect-events [{:keys [id->path]} events]
+(defn connect [{:keys [id->path]} events]
   (let [path-for-id (fn [id]
                       (or (get id->path id)
                           (throw (ex-info (str "no path found for " id " in the model") {:id id}))))]

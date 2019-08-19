@@ -1,10 +1,25 @@
 (ns datagrid.effects)
 
-(defn on-model-update!
-  "Run side effects given the changes map.
-  The path is a collection of the nested path to the value in the model."
-  [{:datagrid.core/keys [effects] :as ctx} changes]
-  (doseq [[path value] changes]
-    ))
+(defn effects-by-paths [effects]
+  (reduce
+    (fn [out {:keys [inputs] :as effect}]
+      (reduce
+        (fn [effects path]
+          (update effects path (fnil conj []) effect))
+        out
+        inputs))
+    {}
+    effects))
 
-;; Maybe some sort of batching thing here
+(defn execute-effects!
+  [{:keys [changes] :datagrid.core/keys [effects] :as ctx}]
+  (prn changes effects)
+  (reduce
+    (fn [visited {:keys [inputs handler] :as effect}]
+      (prn (map changes inputs))
+      (if-not (contains? visited effect)
+        (do (handler ctx (map changes inputs))
+            (conj visited effect))
+        visited))
+    #{}
+    (mapcat (fn [[path]] (get effects path)) changes)))
