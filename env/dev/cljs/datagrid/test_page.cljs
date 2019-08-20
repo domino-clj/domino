@@ -43,10 +43,12 @@
    [:pre (with-out-str (pprint @state))]
    [:p "First name"]
    [:input
-    {:on-change #(transact [:user :first-name] (target-value %))}]
+    {:value (:fname @state)
+     :on-blur #(transact [:user :first-name] (target-value %))}]
    [:p "Last name"]
    [:input
-    {:on-change #(transact [:user :last-name] (target-value %))}]
+    {:value (:lname @state)
+     :on-blur #(transact [:user :last-name] (target-value %))}]
    [:p "Full name"]
    [:p (:full-name @state)]])
 
