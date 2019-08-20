@@ -2,11 +2,7 @@
   (:require
     [datagrid.graph :as graph]
     [datagrid.effects :as effects]
-    [datagrid.model :as model]
-    [datagrid.reactive-atom :as ratom]))
-
-;; TODO: figure this out later
-(defonce ctx (atom {}))
+    [datagrid.model :as model]))
 
 (defn initialize!
   "Takes a schema of :model/model, :model/effects, and :model/effects
@@ -27,33 +23,17 @@
   ([{:model/keys [model effects events]} initial-db]
    (let [model (model/model->paths model)
          events (model/connect model events)]
-     (reset! ctx
-             {::model   model
-              ::events  events
-              ::effects (effects/effects-by-paths (model/connect model effects))
-              ::db      initial-db
-              ::graph   (graph/gen-ev-graph events)}))))
+     {::model   model
+      ::events  events
+      ::effects (effects/effects-by-paths (model/connect model effects))
+      ::db      initial-db
+      ::graph   (graph/gen-ev-graph events)})))
 
-#_(execute-effects!
-    {:changes  {[:a] 1 [:b] 1}
-     ::effects (effects/effects-by-paths [{:inputs [[:a]] :handler (fn [ctx inputs]
-                                                                     (prn inputs))}])})
-
-(defn pub
-  "Take the changes, an ordered collection of changes
+(defn transact
+  "Take the context and the changes which are an ordered collection of changes
 
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
-  ([changes]
-   (pub ctx changes))
-  ([ctx changes]
-   (let [updated-ctx (swap! ctx graph/execute-events changes)]
-     ;#?(:cljs (cljs.pprint/pprint @ctx))
-     (effects/execute-effects! updated-ctx)
-     updated-ctx)))
-
-;; dereffable
-(defn sub
-  ([k]
-   (sub ctx k))
-  ([ctx k]
-   ))
+  [ctx changes]
+  (let [updated-ctx (graph/execute-events ctx changes)]
+    (effects/execute-effects! updated-ctx)
+    updated-ctx))
