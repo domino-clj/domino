@@ -5,23 +5,32 @@
 
 (defonce state (r/atom {}))
 
-(defonce ctx
-         (atom
-           (core/initialize! {:model/model   [[:user {:id :user}
-                                               [:first-name {:id :fname}]
-                                               [:last-name {:id :lname}]
-                                               [:full-name {:id :full-name}]]]
-                              :model/effects [{:inputs  [:fname :lname :full-name]
-                                               :handler (fn [_ [fname lname full-name]]
-                                                          (swap! state assoc
-                                                                 :first-name fname
-                                                                 :last-name lname
-                                                                 :full-name full-name))}]
-                              :model/events  [{:inputs  [:fname :lname]
-                                               :outputs [:full-name]
-                                               :handler (fn [_ [fname lname] _]
-                                                          [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]}
-                             {})))
+(defn gen-effects [{:model/keys [events] :as model}]
+  (assoc model
+    :model/effects
+    (reduce
+      (fn [effects {:keys [outputs]}]
+        (conj
+          effects
+          {:inputs  outputs
+           :handler (fn [_ inputs]
+                      (swap! state merge (zipmap outputs inputs)))}))
+      []
+      events)))
+
+(def ctx
+  (atom
+    (let [model {:model/model
+                 [[:user {:id :user}
+                   [:first-name {:id :fname}]
+                   [:last-name {:id :lname}]
+                   [:full-name {:id :full-name}]]]
+                 :model/events
+                 [{:inputs  [:fname :lname]
+                   :outputs [:full-name]
+                   :handler (fn [_ [fname lname] _]
+                              [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]}]
+      (core/initialize! (gen-effects model) {}))))
 
 (defn transact [path value]
   (swap! ctx core/transact [[path value]]))

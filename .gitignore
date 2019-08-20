@@ -4,3 +4,4 @@ figwheel_server.log
 *.iml
 .nrepl-port
 .lein-failures
+.rebel_readline_history
