@@ -2,7 +2,6 @@
   (:require
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
-    [datagrid.effects :as effects]
     [datagrid.graph :as graph]
     [datagrid.core :as core]))
 
