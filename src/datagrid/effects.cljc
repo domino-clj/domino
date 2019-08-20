@@ -11,13 +11,20 @@
     {}
     effects))
 
+(defn change-effects [effects changes]
+  (mapcat (fn [[path]] (get effects path))
+          changes))
+
+(defn execute-effect! [{:datagrid.core/keys [db] :as ctx} {:keys [inputs handler]}]
+  (handler ctx (map #(get-in db %) inputs)))
+
 (defn execute-effects!
   [{:keys [changes] :datagrid.core/keys [effects] :as ctx}]
   (reduce
-    (fn [visited {:keys [inputs handler] :as effect}]
+    (fn [visited effect]
       (if-not (contains? visited effect)
-        (do (handler ctx (map changes inputs))
+        (do (execute-effect! ctx effect)
             (conj visited effect))
         visited))
     #{}
-    (mapcat (fn [[path]] (get effects path)) changes)))
+    (change-effects effects changes)))
