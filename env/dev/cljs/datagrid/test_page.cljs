@@ -1,7 +1,7 @@
 (ns datagrid.test-page
   (:require [datagrid.core :as core]
             [reagent.core :as r]
-            [cljs.pprint]))
+            [cljs.pprint :refer [pprint]]))
 
 (defonce state (r/atom {}))
 
@@ -40,6 +40,7 @@
 
 (defn home-page []
   [:div
+   [:pre (with-out-str (pprint @state))]
    [:p "First name"]
    [:input
     {:on-change #(transact [:user :first-name] (target-value %))}]
@@ -54,4 +55,3 @@
 
 (defn init! []
   (mount-root))
-
