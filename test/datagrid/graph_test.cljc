@@ -2,6 +2,7 @@
   (:require
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
+    [datagrid.effects :as effects]
     [datagrid.graph :as graph]
     [datagrid.core :as core]))
 
@@ -11,12 +12,32 @@
   ([events inputs expected-result]
    (test-graph-events default-db events inputs expected-result))
   ([db events inputs expected-result]
+   (test-graph-events {} db events inputs expected-result))
+  ([ctx db events inputs expected-result]
    (is
      (= expected-result
-        (select-keys (graph/execute-events {::core/db    db
-                                            ::core/graph (graph/gen-ev-graph events)}
-                                           inputs)
-                     [::core/db :changes])))))
+        (-> (merge
+              ctx
+              {::core/db    db
+               ::core/graph (graph/gen-ev-graph events)})
+            (graph/execute-events inputs)
+            (select-keys [::core/db :changes]))))))
+
+(deftest no-events
+  (test-graph-events
+    []
+    [[[:a] 1]]
+    {::core/db (assoc default-db :a 1)
+     :changes  {[:a] 1}}))
+
+(deftest nil-output-ignored
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [_ _ _])}]
+    [[[:a] 1]]
+    {::core/db (assoc default-db :a 1)
+     :changes  {[:a] 1}}))
 
 (deftest single-input-output
   (test-graph-events
@@ -26,6 +47,36 @@
     [[[:a] 1]]
     {::core/db (assoc default-db :a 1 :b 1)
      :changes  {[:a] 1 [:b] 1}}))
+
+(deftest unmatched-event
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [ctx _ _] [5])}]
+    [[[:c] 1]]
+    {::core/db (assoc default-db :c 1)
+     :changes  {[:c] 1}}))
+
+(deftest nil-value
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [_ _ _] [nil])}]
+    [[[:a] 1]]
+    {::core/db (assoc default-db :a 1 :b nil)
+     :changes  {[:a] 1 [:b] nil}}))
+
+(deftest exception-bubbles-up
+  (is
+    (thrown?
+      #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
+      (graph/execute-events
+        {::core/db    default-db
+         ::core/graph (graph/gen-ev-graph
+                        [{:inputs  [[:a]]
+                          :outputs [[:b]]
+                          :handler (fn [ctx [a] [b]] (throw (ex-info "test" {:test :error})))}])}
+        [[[:a] 1]]))))
 
 (deftest single-unchanged-input
   ;; todo might be better to not run any events if the inputs are the same as the current model
@@ -106,3 +157,26 @@
     [[[:a] 1] [[:b] 1]]
     {::core/db (assoc default-db :a 1 :b 2)
      :changes  {[:a] 1 [:b] 2}}))
+
+(deftest unrelated-events
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [ctx [a] _] [(inc a)])}
+     {:inputs  [[:c]]
+      :outputs [[:d]]
+      :handler (fn [ctx [c] _] [(dec c)])}]
+    [[[:a] 1]]
+    {::core/db (assoc default-db :a 1 :b 2)
+     :changes  {[:a] 1 [:b] 2}}))
+
+(deftest context-access
+  (test-graph-events
+    {:action #(+ % 5)}
+    default-db
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [ctx [a] _] [((:action ctx) a)])}]
+    [[[:a] 1]]
+    {::core/db (assoc default-db :a 1 :b 6)
+     :changes  {[:a] 1 [:b] 6}}))

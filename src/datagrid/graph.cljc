@@ -138,7 +138,9 @@
 
 (defn try-event [{:keys [handler inputs] :as event} ctx db old-outputs]
   (try
-    (handler ctx (get-db-paths db inputs) old-outputs)
+    (or
+      (handler ctx (get-db-paths db inputs) old-outputs)
+      old-outputs)
     (catch #?(:clj Exception :cljs js/Error) e
       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
 

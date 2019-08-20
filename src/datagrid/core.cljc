@@ -1,8 +1,29 @@
 (ns datagrid.core
   (:require
     [datagrid.graph :as graph]
-    [datagrid.effects :as effects]
     [datagrid.model :as model]))
+
+(defn effects-by-paths [effects]
+  (reduce
+    (fn [out {:keys [inputs] :as effect}]
+      (reduce
+        (fn [effects path]
+          (update effects path (fnil conj []) effect))
+        out
+        inputs))
+    {}
+    effects))
+
+(defn execute-effects!
+  [{:keys [changes] :datagrid.core/keys [effects] :as ctx}]
+  (reduce
+    (fn [visited {:keys [inputs handler] :as effect}]
+      (if-not (contains? visited effect)
+        (do (handler ctx (map changes inputs))
+            (conj visited effect))
+        visited))
+    #{}
+    (mapcat (fn [[path]] (get effects path)) changes)))
 
 (defn initialize!
   "Takes a schema of :model/model, :model/effects, and :model/effects
@@ -25,7 +46,7 @@
          events (model/connect model events)]
      {::model   model
       ::events  events
-      ::effects (effects/effects-by-paths (model/connect model effects))
+      ::effects (effects-by-paths (model/connect model effects))
       ::db      initial-db
       ::graph   (graph/gen-ev-graph events)})))
 
@@ -35,5 +56,5 @@
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
   [ctx changes]
   (let [updated-ctx (graph/execute-events ctx changes)]
-    (effects/execute-effects! updated-ctx)
+    (execute-effects! updated-ctx)
     updated-ctx))
