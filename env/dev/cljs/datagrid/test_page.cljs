@@ -21,15 +21,28 @@
 (def ctx
   (atom
     (let [model {:model/model
-                 [[:user {:id :user}
+                 [[:user {}
                    [:first-name {:id :fname}]
                    [:last-name {:id :lname}]
-                   [:full-name {:id :full-name}]]]
+                   [:full-name {:id :full-name}]
+                   [:weight {:id :weight}
+                    [:lb {:id :lb}]
+                    [:kg {:id :kg}]]]
+                  [:physician {}
+                   [:first-name {:id :physician-fname}]]]
                  :model/events
                  [{:inputs  [:fname :lname]
                    :outputs [:full-name]
                    :handler (fn [_ [fname lname] _]
-                              [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]}]
+                              [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}
+                  {:inputs  [:kg]
+                   :outputs [:lb]
+                   :handler (fn [_ [kg] _]
+                              [(* kg 2.20462)])}
+                  {:inputs  [:lb]
+                   :outputs [:kg]
+                   :handler (fn [_ [lb] _]
+                              [(/ lb 2.20462)])}]}]
       (core/initialize! (gen-effects model) {}))))
 
 (defn transact [path value]
@@ -47,6 +60,14 @@
    [:p "Last name"]
    [:input
     {:on-change #(transact [:user :last-name] (target-value %))}]
+   [:p "Weight (kg)"]
+   [:input
+    {:on-change #(transact [:user :weight :kg] (js/parseFloat (target-value %)))
+     :value     (str (:kg @state))}]
+   [:p "Weight (lb)"]
+   [:input
+    {:on-change #(transact [:user :weight :lb] (js/parseFloat (target-value %)))
+     :value     (str (:lb @state))}]
    [:p "Full name"]
    [:p (:full-name @state)]])
 
