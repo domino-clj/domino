@@ -3,20 +3,21 @@
             [reagent.core :as r]
             [cljs.pprint :refer [pprint]]))
 
-(defonce state (r/atom {}))
+(defonce external-state (r/atom {}))
 
 (defn gen-effects [{:model/keys [events] :as model}]
-  (assoc model
-    :model/effects
-    (reduce
-      (fn [effects {:keys [outputs]}]
-        (conj
-          effects
-          {:inputs  outputs
-           :handler (fn [_ inputs]
-                      (swap! state merge (zipmap outputs inputs)))}))
-      []
-      events)))
+  (update model
+          :model/effects
+          (fnil into [])
+          (reduce
+            (fn [effects {:keys [outputs]}]
+              (conj
+                effects
+                {:inputs  outputs
+                 :handler (fn [_ output-values]
+                            (swap! external-state merge (zipmap outputs output-values)))}))
+            []
+            events)))
 
 (def ctx
   (atom
@@ -30,6 +31,8 @@
                     [:kg {:id :kg}]]]
                   [:physician {}
                    [:first-name {:id :physician-fname}]]]
+                 :model/effects
+                 []
                  :model/events
                  [{:inputs  [:fname :lname]
                    :outputs [:full-name]
@@ -48,28 +51,32 @@
 (defn transact [path value]
   (swap! ctx core/transact [[path value]]))
 
+(defn db-value [path]
+  (get-in @ctx (into [:datagrid.core/db] path)))
+
 (defn target-value [e]
   (.. e -target -value))
 
+(defn input [label path & [fmt]]
+  (r/with-let [local-state (r/atom nil)
+               save-value  #(reset! local-state (if fmt (fmt (target-value %)) (target-value %)))]
+    [:div
+     [:label label " "]
+     [:input
+      {:value     @local-state
+       :on-focus  #(reset! local-state (db-value path))
+       :on-change save-value
+       :on-blur   #(transact path @local-state)}]]))
+
 (defn home-page []
   [:div
-   [:pre (with-out-str (pprint @state))]
-   [:p "First name"]
-   [:input
-    {:on-change #(transact [:user :first-name] (target-value %))}]
-   [:p "Last name"]
-   [:input
-    {:on-change #(transact [:user :last-name] (target-value %))}]
-   [:p "Weight (kg)"]
-   [:input
-    {:on-change #(transact [:user :weight :kg] (js/parseFloat (target-value %)))
-     :value     (str (:kg @state))}]
-   [:p "Weight (lb)"]
-   [:input
-    {:on-change #(transact [:user :weight :lb] (js/parseFloat (target-value %)))
-     :value     (str (:lb @state))}]
-   [:p "Full name"]
-   [:p (:full-name @state)]])
+   [:pre (with-out-str (pprint (:datagrid.core/db @ctx)))]
+   [:pre (with-out-str (pprint @external-state))]
+   [input "First name" [:user :first-name]]
+   [input "Last name" [:user :last-name]]
+   [input "Weight (kg)" [:user :weight :kg] js/parseFloat]
+   [input "Weight (lb)" [:user :weight :lb] js/parseFloat]
+   [:label "Full name " (db-value [:user :full-name])]])
 
 (defn mount-root []
   (r/render [home-page] (.getElementById js/document "app")))
