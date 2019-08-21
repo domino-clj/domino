@@ -62,8 +62,12 @@
 (defn state-atom [path]
   (let [state (r/atom nil)]
     (add-watch ctx path
-               (fn [path _ _ new-state]
-                 (reset! state (get-in new-state (into [::core/db] path)))))
+               (fn [path _ old-state new-state]
+                 (let [ctx-path (into [::core/db] path)
+                       old-value (get-in old-state ctx-path)
+                       new-value (get-in new-state ctx-path)]
+                   (when (not= old-value new-value)
+                     (reset! state new-value)))))
     state))
 
 (defn input [label path & [fmt]]
