@@ -3,9 +3,9 @@
             [reagent.core :as r]
             [cljs.pprint :refer [pprint]]))
 
-(defonce external-state (r/atom {}))
-
-(defn gen-effects [{:model/keys [events] :as model}]
+(defn gen-effects
+  "automatically generate default effects for each set of outputs"
+  [{:model/keys [events] :as model}]
   (update model
           :model/effects
           (fnil into [])
@@ -14,13 +14,12 @@
               (conj
                 effects
                 {:inputs  outputs
-                 :handler (fn [_ output-values]
-                            (swap! external-state merge (zipmap outputs output-values)))}))
+                 :handler (fn [_ output-values])}))
             []
             events)))
 
 (def ctx
-  (atom
+  (r/atom
     (let [model {:model/model
                  [[:user {}
                    [:first-name {:id :fname}]
@@ -32,7 +31,10 @@
                   [:physician {}
                    [:first-name {:id :physician-fname}]]]
                  :model/effects
-                 []
+                 [{:inputs [:full-name]
+                   :handler (fn [_ [full-name]]
+                              (when (= "Bobberton, Bob" full-name)
+                                (js/alert "launching missiles!")))}]
                  :model/events
                  [{:inputs  [:fname :lname]
                    :outputs [:full-name]
@@ -46,7 +48,7 @@
                    :outputs [:kg]
                    :handler (fn [_ [lb] _]
                               [(/ lb 2.20462)])}]}]
-      (core/initialize! (gen-effects model) {}))))
+      (core/initialize! model {}))))
 
 (defn transact [path value]
   (swap! ctx core/transact [[path value]]))
@@ -70,13 +72,14 @@
 
 (defn home-page []
   [:div
-   [:pre (with-out-str (pprint (:datagrid.core/db @ctx)))]
-   [:pre (with-out-str (pprint @external-state))]
    [input "First name" [:user :first-name]]
    [input "Last name" [:user :last-name]]
-   [input "Weight (kg)" [:user :weight :kg] js/parseFloat]
-   [input "Weight (lb)" [:user :weight :lb] js/parseFloat]
-   [:label "Full name " (db-value [:user :full-name])]])
+   [input "Weight (kg)" [:user :weight :kg] (fnil js/parseFloat 0)]
+   [input "Weight (lb)" [:user :weight :lb] (fnil js/parseFloat 0)]
+   [:label "Full name " (db-value [:user :full-name])]
+   [:hr]
+   [:h4 "DB state"]
+   [:pre (with-out-str (pprint (:datagrid.core/db @ctx)))]])
 
 (defn mount-root []
   (r/render [home-page] (.getElementById js/document "app")))
