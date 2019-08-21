@@ -31,7 +31,7 @@
                   [:physician {}
                    [:first-name {:id :physician-fname}]]]
                  :model/effects
-                 [{:inputs [:full-name]
+                 [{:inputs  [:full-name]
                    :handler (fn [_ [full-name]]
                               (when (= "Bobberton, Bob" full-name)
                                 (js/alert "launching missiles!")))}]
@@ -54,19 +54,25 @@
   (swap! ctx core/transact [[path value]]))
 
 (defn db-value [path]
-  (get-in @ctx (into [:datagrid.core/db] path)))
+  (get-in @ctx (into [::core/db] path)))
 
 (defn target-value [e]
   (.. e -target -value))
 
+(defn state-atom [path]
+  (let [state (r/atom nil)]
+    (add-watch ctx path
+               (fn [path _ _ new-state]
+                 (reset! state (get-in new-state (into [::core/db] path)))))
+    state))
+
 (defn input [label path & [fmt]]
-  (r/with-let [local-state (r/atom nil)
+  (r/with-let [local-state (state-atom path)
                save-value  #(reset! local-state (if fmt (fmt (target-value %)) (target-value %)))]
     [:div
      [:label label " "]
      [:input
       {:value     @local-state
-       :on-focus  #(reset! local-state (db-value path))
        :on-change save-value
        :on-blur   #(transact path @local-state)}]]))
 
