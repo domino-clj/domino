@@ -5,9 +5,9 @@
 
 (defn gen-effects
   "automatically generate default effects for each set of outputs"
-  [{:model/keys [events] :as model}]
+  [{:keys [events] :as model}]
   (update model
-          :model/effects
+          :effects
           (fnil into [])
           (reduce
             (fn [effects {:keys [outputs]}]
@@ -20,7 +20,7 @@
 
 (def ctx
   (r/atom
-    (let [model {:model/model
+    (let [model {:model
                  [[:user {}
                    [:first-name {:id :fname}]
                    [:last-name {:id :lname}]
@@ -30,12 +30,12 @@
                     [:kg {:id :kg}]]]
                   [:physician {}
                    [:first-name {:id :physician-fname}]]]
-                 :model/effects
+                 :effects
                  [{:inputs  [:full-name]
                    :handler (fn [_ [full-name]]
                               (when (= "Bobberton, Bob" full-name)
                                 (js/alert "launching missiles!")))}]
-                 :model/events
+                 :events
                  [{:inputs  [:fname :lname]
                    :outputs [:full-name]
                    :handler (fn [_ [fname lname] _]

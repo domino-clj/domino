@@ -4,7 +4,7 @@
 (defonce ctx (atom {}))
 
 (def example-schema
-  {:model/model
+  {:model
    [[:patient {}
      [:weight {}
       [:lb {:id :weight-lb}]
@@ -14,7 +14,7 @@
      [:note {:id :note}]
      [:addresses {:id :addresses}]]]
 
-   :model/effects
+   :effects
    {:model
     {:effect-name {:initial :state}
      :bmi-widget  {:visible? false
@@ -27,7 +27,7 @@
                  [{:visible? true
                    :valid?   false}])}]}
 
-   :model/events
+   :events
    [{:type    :collection
      :inputs  [:addresses]
      :actions [:col/add :col/remove :col/move]}

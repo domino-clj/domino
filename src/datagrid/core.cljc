@@ -5,7 +5,7 @@
     [datagrid.model :as model]))
 
 (defn initialize!
-  "Takes a schema of :model/model, :model/effects, and :model/effects
+  "Takes a schema of :model, :effects, and :effects
 
   1. Parse the model
   2. Inject paths into events
@@ -20,7 +20,7 @@
     "
   ([schema]
    (initialize! schema {}))
-  ([{:model/keys [model effects events]} initial-db]
+  ([{:keys [model effects events]} initial-db]
    (let [model (model/model->paths model)
          events (model/connect model events)]
      {::model   model
