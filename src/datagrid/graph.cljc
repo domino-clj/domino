@@ -152,7 +152,7 @@
   In changed cases, the following keys are updated:
   ::changed-paths => queue of affected paths
   ::db => temporary relevant db within context
-  ::changes => key-value pair of path and new"
+  ::change-history => sequential history of changes. List of tuples of path-value pairs"
   [edges {::keys [db executed-events] :as ctx}]
   (reduce
     (fn [ctx {{:keys [inputs outputs handler] :as event} :edge}]
@@ -172,7 +172,7 @@
                 (-> ctx
                     (update ::changed-paths (fnil conj empty-queue) path)
                     (update ::db assoc-in path new)
-                    (update ::changes assoc path new))
+                    (update ::changes conj [path new]))
                 ctx))
             ctx
             (map vector outputs old-outputs new-outputs)))))
@@ -214,12 +214,12 @@
                                     (-> ctx
                                         (update ::db assoc-in path value)
                                         (update ::changed-paths conj path)
-                                        (update ::changes assoc path value)))
+                                        (update ::changes conj [path value])))
                                   (assoc ctx ::db db
                                              ::changed-paths empty-queue
                                              ::executed-events #{}
-                                             ::changes {})
+                                             ::changes [])
                                   inputs)
                                 graph)]
     (assoc ctx :datagrid.core/db db
-               :changes changes)))
+               :change-history changes)))

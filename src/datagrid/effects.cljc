@@ -19,7 +19,7 @@
   (handler ctx (map #(get-in db %) inputs)))
 
 (defn execute-effects!
-  [{:keys [changes] :datagrid.core/keys [effects] :as ctx}]
+  [{:keys [change-history] :datagrid.core/keys [effects] :as ctx}]
   (reduce
     (fn [visited effect]
       (if-not (contains? visited effect)
@@ -27,4 +27,4 @@
             (conj visited effect))
         visited))
     #{}
-    (change-effects effects changes)))
+    (change-effects effects (distinct (map first change-history))))) ;; TODO: double check this approach when changes is a sequential history
