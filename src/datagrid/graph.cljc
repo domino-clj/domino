@@ -182,6 +182,12 @@
 (defn input? [edge]
   (= :input (:relationship edge)))
 
+(defn origin-path [graph origin]
+  (loop [origin (vec origin)]
+    (or (when (empty? origin) ::does-not-exist)
+        (when (contains? graph origin) origin)
+        (recur (subvec origin 0 (dec (count origin)))))))
+
 (defn eval-traversed-edges
   "Given an origin and graph, update context with edges.
 
@@ -191,8 +197,9 @@
          xs (pop changed-paths)]
      (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
   ([{::keys [changes] :as ctx} graph origin]
-   (let [edges          (filter input? (get graph origin #{}))
-         removed-origin (dissoc graph origin)
+   (let [focal-origin   (origin-path graph origin)
+         edges          (filter input? (get graph focal-origin #{}))
+         removed-origin (dissoc graph focal-origin)
          {::keys [changed-paths] :as new-ctx} (ctx-updater edges ctx)
          x              (peek changed-paths)
          xs             (pop changed-paths)]

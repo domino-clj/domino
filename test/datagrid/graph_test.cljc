@@ -5,7 +5,7 @@
     [datagrid.graph :as graph]
     [datagrid.core :as core]))
 
-(def default-db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0})
+(def default-db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0 :h {:i 0}})
 
 (defn test-graph-events
   ([events inputs expected-result]
@@ -179,3 +179,14 @@
     [[[:a] 1]]
     {::core/db (assoc default-db :a 1 :b 6)
      :changes  {[:a] 1 [:b] 6}}))
+
+(deftest triggering-sub-path
+  (test-graph-events
+    [{:inputs  [[:h]]
+      :outputs [[:h]]
+      :handler (fn [ctx [h] [old-h]]
+                 [(update old-h :i + (:i h))])}]
+    [[[:h :i] 1]]                                           ;; [[[:h] {:i 2}]]
+    {::core/db (assoc default-db :h {:i 2})
+     :changes  {[:h :i] 1                                   ;; TODO: do we want to remove this key. The value is the intermediate value
+                [:h] {:i 2}}}))
