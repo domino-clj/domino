@@ -12,7 +12,7 @@
     effects))
 
 (defn change-effects [effects changes]
-  (mapcat (fn [[path]] (get effects path))
+  (mapcat (fn [path] (get effects path))
           changes))
 
 (defn execute-effect! [{:datagrid.core/keys [db] :as ctx} {:keys [inputs handler]}]
