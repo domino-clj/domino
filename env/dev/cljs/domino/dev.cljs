@@ -1,6 +1,6 @@
-(ns ^:figwheel-no-load datagrid.dev
+(ns ^:figwheel-no-load domino.dev
   (:require
-    [datagrid.test-page :as test-page]
+    [domino.test-page :as test-page]
     [devtools.core :as devtools]))
 
 (devtools/install!)

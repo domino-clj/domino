@@ -1,8 +1,8 @@
-(ns datagrid.model-test
+(ns domino.model-test
   (:require
-    [datagrid.core :as core]
-    [datagrid.graph :as graph]
-    [datagrid.model :refer :all]
+    [domino.core :as core]
+    [domino.graph :as graph]
+    [domino.model :refer :all]
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 

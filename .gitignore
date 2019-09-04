@@ -5,3 +5,4 @@ figwheel_server.log
 .nrepl-port
 .lein-failures
 .rebel_readline_history
+.lein-repl-history

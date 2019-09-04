@@ -1,4 +1,4 @@
-(ns datagrid.effects)
+(ns domino.effects)
 
 (defn effects-by-paths [effects]
   (reduce
@@ -15,11 +15,11 @@
   (mapcat (fn [path] (get effects path))
           changes))
 
-(defn execute-effect! [{:datagrid.core/keys [db] :as ctx} {:keys [inputs handler]}]
+(defn execute-effect! [{:domino.core/keys [db] :as ctx} {:keys [inputs handler]}]
   (handler ctx (map #(get-in db %) inputs)))
 
 (defn execute-effects!
-  [{:keys [change-history] :datagrid.core/keys [effects] :as ctx}]
+  [{:keys [change-history] :domino.core/keys [effects] :as ctx}]
   (reduce
     (fn [visited effect]
       (if-not (contains? visited effect)

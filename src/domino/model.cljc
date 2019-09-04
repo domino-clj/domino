@@ -1,4 +1,4 @@
-(ns datagrid.model
+(ns domino.model
   (:require
     [clojure.set :refer [map-invert]]))
 

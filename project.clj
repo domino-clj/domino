@@ -1,6 +1,6 @@
-(defproject datagrid "0.1.0"
+(defproject domino-core "0.1.0-alpha"
             :description "FIXME: write description"
-            :url "http://example.com/FIXME"
+            :url "https://github.com/yogthos/datagrid"
             :license {:name "Eclipse Public License"
                       :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies
@@ -50,13 +50,13 @@
      :nrepl-middleware [cider.piggieback/wrap-cljs-repl
                         cider.nrepl/cider-middleware]
      :css-dirs         ["resources/public/css" "env/dev/resources/public/css"]
-     :ring-handler     datagrid.server/app}
+     :ring-handler     domino.server/app}
     :cljsbuild
     {:builds
      {:app
       {:source-paths ["src" "env/dev/cljs"]
-       :figwheel     {:on-jsload "datagrid.test-page/mount-root"}
-       :compiler     {:main          datagrid.dev
+       :figwheel     {:on-jsload "domino.test-page/mount-root"}
+       :compiler     {:main          domino.dev
                       :asset-path    "/js/out"
                       :output-to     "target/cljsbuild/public/js/app.js"
                       :output-dir    "target/cljsbuild/public/js/out"
@@ -69,7 +69,7 @@
     {:builds
      {:test
       {:source-paths ["src" "test"]
-       :compiler     {:main          datagrid.runner
+       :compiler     {:main          domino.runner
                       :output-to     "target/test/core.js"
                       :target        :nodejs
                       :optimizations :none

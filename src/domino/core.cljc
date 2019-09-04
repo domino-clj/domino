@@ -1,8 +1,8 @@
-(ns datagrid.core
+(ns domino.core
   (:require
-    [datagrid.effects :as effects]
-    [datagrid.graph :as graph]
-    [datagrid.model :as model]))
+    [domino.effects :as effects]
+    [domino.graph :as graph]
+    [domino.model :as model]))
 
 (defn initialize!
   "Takes a schema of :model, :effects, and :effects

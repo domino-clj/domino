@@ -1,4 +1,4 @@
-(ns datagrid.graph
+(ns domino.graph
   (:require
     [clojure.set :refer [union]]))
 
@@ -207,7 +207,7 @@
        (recur (assoc new-ctx ::changed-paths xs) removed-origin x)
        new-ctx))))
 
-(defn execute-events [{:datagrid.core/keys [db graph] :as ctx} inputs]
+(defn execute-events [{:domino.core/keys [db graph] :as ctx} inputs]
   (let [{::keys [db changes]} (eval-traversed-edges
                                 (reduce
                                   (fn [ctx [path value]]
@@ -221,5 +221,5 @@
                                              ::changes [])
                                   inputs)
                                 graph)]
-    (assoc ctx :datagrid.core/db db
+    (assoc ctx :domino.core/db db
                :change-history changes)))

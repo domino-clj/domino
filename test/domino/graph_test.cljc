@@ -1,9 +1,9 @@
-(ns datagrid.graph-test
+(ns domino.graph-test
   (:require
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
-    [datagrid.graph :as graph]
-    [datagrid.core :as core]))
+    [domino.graph :as graph]
+    [domino.core :as core]))
 
 (def default-db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0 :h {:i 0}})
 

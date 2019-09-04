@@ -17,11 +17,11 @@ By declaring
 
 Datagrid is a monorepo with several sub-projects.
 
-- datagrid-core: The event engine and API to hook into implementations (e.g. front-end or back-end)
-- datagrid-ui: Reagent?
-- datagrid-memory: Engine to run in memory -- can be cljc to support execution on both front or back? Perhaps fits with core? TBD
-- datagrid-ws:
-- datagrid-ajax:
+- domino-core: The event engine and API to hook into implementations (e.g. front-end or back-end)
+- domino-ui: Reagent?
+- domino-memory: Engine to run in memory -- can be cljc to support execution on both front or back? Perhaps fits with core? TBD
+- domino-ws:
+- domino-ajax:
 
 (maybe others?)
 

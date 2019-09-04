@@ -1,5 +1,5 @@
-(ns datagrid.test-page
-  (:require [datagrid.core :as core]
+(ns domino.test-page
+  (:require [domino.core :as core]
             [reagent.core :as r]
             [cljs.pprint :refer [pprint]]))
 
@@ -89,7 +89,7 @@
    [:label "Full name " (db-value [:user :full-name])]
    [:hr]
    [:h4 "DB state"]
-   [:pre (with-out-str (pprint (:datagrid.core/db @ctx)))]])
+   [:pre (with-out-str (pprint (:domino.core/db @ctx)))]])
 
 (defn mount-root []
   (r/render [home-page] (.getElementById js/document "app")))
