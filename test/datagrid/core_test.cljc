@@ -1,4 +1,4 @@
-(ns datagrid.test-core
+(ns datagrid.core-test
   (:require
     [datagrid.core :refer :all]
     [datagrid.effects :refer :all]

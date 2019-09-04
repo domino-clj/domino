@@ -4,7 +4,11 @@
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 
-#_(execute-effects!
-    {:changes  {[:a] 1 [:b] 1}
-     ::effects (effects/effects-by-paths [{:inputs [[:a]] :handler (fn [ctx inputs]
-                                                                     (prn inputs))}])})
+(deftest effects-test
+  (let [data (atom nil)]
+    (effects/execute-effects!
+      {:change-history        [[[:a] 1] [[:b] 1]]
+       :datagrid.core/db      {:a 1 :b 1}
+       :datagrid.core/effects (effects/effects-by-paths [{:inputs [[:a]] :handler (fn [ctx inputs]
+                                                                                    (reset! data inputs))}])})
+    (is (= [1] @data))))
