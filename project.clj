@@ -1,5 +1,5 @@
 (defproject domino-core "0.1.0-alpha"
-            :description "FIXME: write description"
+            :description "Clojure data flow engine"
             :url "https://github.com/yogthos/datagrid"
             :license {:name "Eclipse Public License"
                       :url "http://www.eclipse.org/legal/epl-v10.html"}
