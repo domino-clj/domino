@@ -8,13 +8,13 @@ Domino is a data flow engine that helps you organize the interactions between yo
 
 A common problem applications tend to have a lot of ad hoc business logic. This negatively affects maintainability because it becomes difficult to reason about how one change affects another part of the program. This also makes it a challenge to refactor, change, or add to programs. Domino makes the interactions between pieces of business logic explicit and centralized.
 
-Domino explicitly separates logic that explicitly makes changes to the data model from side effectful functions. Business logic functions in Domino explicitly declare how they interact with the data model by declaring their inputs and outputs. Domino builds graphs of related events using these declarations. This approach handles cascading business logic out of the box, and provides a data specification for your business logic. 
+Domino explicitly separates logic that makes changes to the data model from side effectful functions. Business logic functions in Domino explicitly declare how they interact with the data model by declaring their inputs and outputs. Domino builds graphs of related events using these declarations. This approach handles cascading business logic out of the box, and provides a data specification for your business logic. 
 
 ## Usage
 
 Domino consists of three main concepts:
 
-1. **model**: The model represents the paths within an EDN data structure. These paths will typically represents fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key. For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition: 
+1. **model**: The model represents the paths within an EDN data structure. These paths will typically represent fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key. For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition: 
 
 ```clojure 
 [[:patient [:first-name {:id :fname}]]]
@@ -26,7 +26,7 @@ Domino consists of three main concepts:
 {:inputs  [:amount]
  :outputs [:total]
  :handler (fn [ctx [amount] [total]]
-                     [(+ total amount)])}
+            [(+ total amount)])}
 ```
 
 3. **effects**: Effects are executed after events have been transacted and the new context is produced. Effects are defined as a map of `:inputs` and `:handler` function, where the handler accepts two arguments: a context containing the current state of the engine, and a list of input values. The effects do not cascade. For example:
@@ -35,7 +35,7 @@ Domino consists of three main concepts:
 {:inputs [:total]
  :handler (fn [ctx [total]]
             (when (> total 1337)
-            (println "Woah. That's a lot.")))}
+              (println "Woah. That's a lot.")))}
 ```
 
 Steps to using Domino:
@@ -48,7 +48,7 @@ Steps to using Domino:
 
 2. Declare your schema
 
-Let's take a look at a simple engine that accumulates a total. Whenever an amount is set, this value is added to the current value of the total. If the total exceeds 1337 at any point, it prints out a statement that "Woah. That's a lot."
+Let's take a look at a simple engine that accumulates a total. Whenever an amount is set, this value is added to the current value of the total. If the total exceeds 1337 at any point, it prints out a statement that says "Woah. That's a lot."
 
 ```clojure
 (def schema
@@ -72,7 +72,7 @@ You initialize the engine by calling the `domino/initialize!` function. This fun
 (def ctx (atom (domino/initialize! schema {:total 0})))
 ```
 
-Initialize will the initial state of the engine (context). This will contain the model, events, effects, event graph, and db (state). In our example we use an atom in order to easily update the state of the engine.
+`initialize!` will create the initial state of the engine (context). This will contain the model, events, effects, event graph, and db (state). In our example we use an atom in order to easily update the state of the engine.
 
 4. Transact your external data changes
 
