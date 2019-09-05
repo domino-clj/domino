@@ -10,7 +10,7 @@ A common problem applications tend to have a lot of ad hoc business logic. This 
 
 Domino explicitly separates logic that makes changes to the data model from side effectful functions. Business logic functions in Domino explicitly declare how they interact with the data model by declaring their inputs and outputs. Domino builds graphs of related events using these declarations. This approach handles cascading business logic out of the box, and provides a data specification for your business logic. 
 
-## Usage
+## Concepts
 
 Domino consists of three main concepts:
 
@@ -38,7 +38,7 @@ Domino consists of three main concepts:
               (println "Woah. That's a lot.")))}
 ```
 
-Steps to using Domino:
+## Usage
 
 1. Require domino.core
 
