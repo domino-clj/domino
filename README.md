@@ -76,7 +76,7 @@ You initialize the engine by calling the `domino/initialize!` function. This fun
 
 4. Transact your external data changes
 
-We can update the state of the data by calling the `domino/transact` function that accepts the current ctx and an inputs vector, and returns the updated context. The input vector is a collection of path-value pairs. For example, to set the value of `:amount` to 10, you would pass in the following input vector `[[[:amount] 10]].
+We can update the state of the data by calling the `domino/transact` function that accepts the current ctx and an inputs vector, and returns the updated context. The input vector is a collection of path-value pairs. For example, to set the value of `:amount` to 10, you would pass in the following input vector `[[[:amount] 10]]`.
 
 ```clojure
 (swap! ctx domino/transact [[[:amount] 10]])
