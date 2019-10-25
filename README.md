@@ -2,6 +2,8 @@
 
 **WARNING: Alpha library. Subject to breaking API changes**
 
+see here for [interactive documentation](https://domino-clj.github.io/domino/)
+
 ## Rationale
 
 Domino is a data flow engine that helps you organize the interactions between your data model and events. Domino allows you to declare your business logic using a directed acyclic graph of events and effects. Whenever an external change is transacted to the data model, the graph determines the chain of events that will be executed, and side effects triggered as a result of the computation.
