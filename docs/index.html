@@ -43,24 +43,27 @@
     lot."</p>
 
     <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/" data-preamble="(require '[domino.core :as domino])">
-    (def schema
-      {:model   [[:amount {:id :amount}]
-                  [:total {:id :total}]]
-      :events  [{:inputs  [:amount]
-                  :outputs [:total]
-                  :handler (fn [ctx [amount] [total]]
-                              [(+ total amount)])}]
-      :effects [{:inputs [:total]
-                  :handler (fn [ctx [total]]
-                              (when (> total 1337)
-                              (println "Woah. That's a lot.")))}]})</code></pre>
+      (def schema
+        {:model   [[:amount {:id :amount}]
+                    [:total {:id :total}]]
+        :events  [{:inputs  [:amount]
+                    :outputs [:total]
+                    :handler (fn [ctx [amount] [total]]
+                                [(+ total amount)])}]
+        :effects [{:inputs [:total]
+                    :handler (fn [ctx [total]]
+                                (when (> total 1337)
+                                (println "Woah. That's a lot.")))}]})
+    </code></pre>
 
     <strong>3. Initialize the engine</strong>
     <p>You initialize the engine by calling the <code>domino/initialize!</code> function. This function is a one- or two-arity function,
     taking a schema and, optionally, an initial state map. In our example, we will give it our defined schema, and an
     initial value for <code>:total</code> as 0.</p>
 
-    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">(def ctx (atom (domino/initialize! schema {:total 0})))</code></pre>
+    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">
+      (def ctx (atom (domino/initialize! schema {:total 0})))
+    </code></pre>
     
     <p><code>initialize!</code> will create the initial state of the engine (context). This will contain the model, events, effects, event
     graph, and db (state). In our example we use an atom in order to easily update the state of the engine.</p>
@@ -70,12 +73,16 @@
     vector, and returns the updated context. The input vector is a collection of path-value pairs. For example, to set the
     value of <code>:amount</code> to 10, you would pass in the following input vector <code>[[[:amount] 10]]</code>.</p>
 
-    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">(swap! ctx domino/transact [[[:amount] 10]])</code></pre>
+    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">
+      (swap! ctx domino/transact [[[:amount] 10]])
+    </code></pre>
 
     <p>The updated context contains the <code>:change-history</code> which is a simple vector of all the changes as they were applied to the
     data (in sequence).</p>
 
-    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">(:change-history @ctx)</code></pre>
+    <pre><code class="lang-eval-clojure" data-external-libs="https://raw.githubusercontent.com/domino-clj/domino/master/src/">
+      (:change-history @ctx)
+    </code></pre>
 
     <p>We can see the new context contains the updated total amount and the change history shows the order in which the changes
     were applied.</p>
