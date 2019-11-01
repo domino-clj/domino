@@ -1,7 +1,5 @@
 # domino
 
-**WARNING: Alpha library. Subject to breaking API changes**
-
 see here for [interactive documentation](https://domino-clj.github.io)
 
 ## Rationale
