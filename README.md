@@ -2,7 +2,7 @@
 
 **WARNING: Alpha library. Subject to breaking API changes**
 
-see here for [interactive documentation](https://domino-clj.github.io/domino/)
+see here for [interactive documentation](https://domino-clj.github.io)
 
 ## Rationale
 

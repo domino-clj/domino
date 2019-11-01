@@ -1,4 +1,4 @@
-(defproject domino-core "0.1.0-alpha"
+(defproject domino/core "0.1.0"
             :description "Clojure(script) data flow engine"
             :url "https://github.com/yogthos/domino"
             :license {:name "Eclipse Public License"
