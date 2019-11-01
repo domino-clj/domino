@@ -6,3 +6,4 @@ figwheel_server.log
 .lein-failures
 .rebel_readline_history
 .lein-repl-history
+pom.xml
