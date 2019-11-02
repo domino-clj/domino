@@ -5,7 +5,7 @@
     [domino.model :as model]))
 
 (defn initialize!
-  "Takes a schema of :model, :effects, and :effects
+  "Takes a schema of :model, :events, and :effects
 
   1. Parse the model
   2. Inject paths into events
