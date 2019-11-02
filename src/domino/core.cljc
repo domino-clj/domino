@@ -14,8 +14,8 @@
 
   ctx is a map of:
     ::model => a map of model keys to paths
-    ::events => ;; TODO
-    ::effects => the side effects as configured in the schema passed in
+    ::events => a vector of events with pure functions that transform the state
+    ::effects => a vector of effects with functions that produce external effects
     ::state => the state of actual working data
     "
   ([schema]
