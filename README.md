@@ -1,5 +1,7 @@
 # domino
 
+[![Clojars Project](https://img.shields.io/clojars/v/domino/core.svg)](https://clojars.org/domino/core)
+
 see here for [interactive documentation](https://domino-clj.github.io)
 
 ## Rationale
