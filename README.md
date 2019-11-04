@@ -113,7 +113,7 @@ The updated `ctx` contains the `:change-history` which is a simple vector of all
 
 We can see the new context contains the updated total amount and the change history shows the order in which the changes were applied.
 
-The `:domino.core/db` key in the context will contain the updates state reflecting the changes applied by running the events.
+The `:domino.core/db` key in the context will contain the updated state reflecting the changes applied by running the events.
 
 ```eval-clojure
 (:domino.core/db @ctx)
