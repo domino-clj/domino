@@ -4,7 +4,7 @@
     [domino.graph :as graph]
     [domino.model :as model]))
 
-(defn initialize!
+(defn initialize
   "Takes a schema of :model, :events, and :effects
 
   1. Parse the model
@@ -19,15 +19,21 @@
     ::state => the state of actual working data
     "
   ([schema]
-   (initialize! schema {}))
+   (initialize schema {}))
   ([{:keys [model effects events]} initial-db]
-   (let [model (model/model->paths model)
+   (let [model  (model/model->paths model)
          events (model/connect model events)]
-     {::model   model
-      ::events  events
-      ::effects (effects/effects-by-paths (model/connect model effects))
-      ::db      initial-db
-      ::graph   (graph/gen-ev-graph events)})))
+     {::model        model
+      ::events       events
+      ::events-by-id (reduce
+                       (fn [events-by-id event]
+                         (if-let [id (:id event)]
+                           (assoc events-by-id id event)
+                           events-by-id))
+                       events)
+      ::effects      (effects/effects-by-paths (model/connect model effects))
+      ::db           initial-db
+      ::graph        (graph/gen-ev-graph events)})))
 
 (defn transact
   "Take the context and the changes which are an ordered collection of changes

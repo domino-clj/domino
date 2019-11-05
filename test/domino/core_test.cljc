@@ -8,23 +8,23 @@
 
 (defn init-ctx [state]
   (atom
-    (initialize! {:model   [[:user {:id :user}
-                                   [:first-name {:id :fname}]
-                                   [:last-name {:id :lname}]
-                                   [:full-name {:id :full-name}]]]
-                  :effects [{:inputs  [:fname :lname :full-name]
-                                   :handler (fn [_ [fname lname full-name]]
-                                              (swap! state assoc
-                                                     :first-name fname
-                                                     :last-name lname
-                                                     :full-name full-name))}]
-                  :events  [{:inputs  [:fname :lname]
-                                   :outputs [:full-name]
-                                   :handler (fn [_ [fname lname] _]
-                                              [(or (when (and fname lname) (str lname ", " fname))
-                                                   fname
-                                                   lname)])}]}
-                 {})))
+    (initialize {:model   [[:user {:id :user}
+                            [:first-name {:id :fname}]
+                            [:last-name {:id :lname}]
+                            [:full-name {:id :full-name}]]]
+                 :effects [{:inputs  [:fname :lname :full-name]
+                            :handler (fn [_ [fname lname full-name]]
+                                       (swap! state assoc
+                                              :first-name fname
+                                              :last-name lname
+                                              :full-name full-name))}]
+                 :events  [{:inputs  [:fname :lname]
+                            :outputs [:full-name]
+                            :handler (fn [_ [fname lname] _]
+                                       [(or (when (and fname lname) (str lname ", " fname))
+                                            fname
+                                            lname)])}]}
+                {})))
 
 (deftest transaction-test
   (let [external-state (atom {})
@@ -33,4 +33,18 @@
     (is (= {:first-name "Bob" :last-name nil :full-name "Bob"} @external-state))
     (swap! ctx transact [[[:user :last-name] "Bobberton"]])
     (is (= {:first-name "Bob" :last-name "Bobberton" :full-name "Bobberton, Bob"} @external-state))))
+
+(let [ctx (initialize {:model  [[:demograpics
+                                 {:id :foo}
+                                 [:first-name {:id :fname}]
+                                 [:last-name {:id :lname}]
+                                 [:full-name {:id :full-name}]]]
+                       :events [{:inputs  [:fname :lname]
+                                 :outputs [:full-name]
+                                 :handler (fn [_ [fname lname] _]
+                                            [(or (when (and fname lname) (str lname ", " fname))
+                                                 fname
+                                                 lname)])}]}
+                      {})]
+  (:domino.core/db (transact ctx [[[:demographics :first-name] "Bob"]])))
 

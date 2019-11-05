@@ -89,13 +89,13 @@ Domino explicitly separates the code that modifies the state of the data from th
 
 **3. Initialize the engine**
 
-The `schema` that we declared above provides a specification for the internal data model and the code that operates on it. Once we've created a schema, we will need to initialize the data flow engine. This is done by calling the `domino/initialize!` function. This function can be called by providing a schema along with an optional initial state map. In our example, we will give it the `schema` that we defined above, and an initial value for the state with the `:total` set to `0`.
+The `schema` that we declared above provides a specification for the internal data model and the code that operates on it. Once we've created a schema, we will need to initialize the data flow engine. This is done by calling the `domino/initialize` function. This function can be called by providing a schema along with an optional initial state map. In our example, we will give it the `schema` that we defined above, and an initial value for the state with the `:total` set to `0`.
 
 ```eval-clojure
-(def ctx (atom (domino/initialize! schema {:total 0})))
+(def ctx (atom (domino/initialize schema {:total 0})))
 ```
 
-Calling the `initialize!` function creates a context `ctx` that's used as the initial state for the engine. The context will contain the model, events, effects, event graph, and db (state). In our example we use an atom in order to easily update the state of the engine.
+Calling the `initialize` function creates a context `ctx` that's used as the initial state for the engine. The context will contain the model, events, effects, event graph, and db (state). In our example we use an atom in order to easily update the state of the engine.
 
 **4. Transact your external data changes**
 

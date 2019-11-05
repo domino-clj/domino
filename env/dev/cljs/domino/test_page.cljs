@@ -48,7 +48,7 @@
                    :outputs [:kg]
                    :handler (fn [_ [lb] _]
                               [(/ lb 2.20462)])}]}]
-      (core/initialize! model {}))))
+      (core/initialize model {}))))
 
 (defn transact [path value]
   (swap! ctx core/transact [[path value]]))

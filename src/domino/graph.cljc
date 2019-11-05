@@ -207,6 +207,9 @@
        (recur (assoc new-ctx ::changed-paths xs) removed-origin x)
        new-ctx))))
 
+(defn trigger-event [{:domino.core/keys [db graph] :as ctx} event-id]
+  ())
+
 (defn execute-events [{:domino.core/keys [db graph] :as ctx} inputs]
   (let [{::keys [db changes]} (eval-traversed-edges
                                 (reduce
