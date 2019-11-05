@@ -144,6 +144,14 @@
     (catch #?(:clj Exception :cljs js/Error) e
       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
 
+(defn build-change-paths
+  [path]
+  (loop [paths []
+         path path]
+    (if (not-empty path)
+      (recur (conj paths (vec path)) (drop-last path))
+      paths)))
+
 (defn ctx-updater
   "Reducer that updates context with new values updated in ctx from
   handler of each edge. New values are only stored when they are different
@@ -170,7 +178,8 @@
             (fn [ctx [path old new]]
               (if (not= old new)
                 (-> ctx
-                    (update ::changed-paths (fnil conj empty-queue) path)
+                    (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+                                            (build-change-paths path))
                     (update ::db assoc-in path new)
                     (update ::changes conj [path new]))
                 ctx))
@@ -208,6 +217,7 @@
        new-ctx))))
 
 (defn execute-events [{:domino.core/keys [db graph] :as ctx} inputs]
+  (println inputs)
   (let [{::keys [db changes]} (eval-traversed-edges
                                 (reduce
                                   (fn [ctx [path value]]
