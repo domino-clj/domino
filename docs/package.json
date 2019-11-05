@@ -1,0 +1,12 @@
+{
+  "name": "domino-docs",
+  "version": "0.0.1",
+  "dependencies": {
+    "lumo-cljs": "1.9.0",
+    "nunjucks": "3.1.7",
+    "marked": "0.7.0"
+  },
+  "scripts": {
+    "start": "./generator.cljs"
+  }
+}

@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>domino-clj</title>
+    <meta charset="utf-8">
+    <!-- KLIPSE ASSETS -->
+    <link rel="stylesheet" type="text/css" href="https://storage.googleapis.com/app.klipse.tech/css/codemirror.css">
+    <script>
+        window.klipse_settings = {
+            selector: '.language-eval-clojure', // css selector for the html elements you want to klipsify
+        };
+    </script>
+    <!-- END KLIPSE ASSETS -->
+
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="stylesheet" type="text/css" href="highlight.pack.css">
+
+</head>
+
+<body>
+    {{ content | safe}}
+
+    <script src="highlight.pack.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+                document.querySelectorAll('pre code.language-clojure').forEach((block) => {
+                    hljs.highlightBlock(block);
+                });
+            });
+    </script>
+    <script src="https://storage.googleapis.com/app.klipse.tech/plugin/js/klipse_plugin.js"></script>
+</body>
+
+</html>

@@ -1,0 +1,35 @@
+version: 2
+
+jobs:
+  deploy-docs:
+    docker: 
+      - image: circleci/node:latest
+    steps:
+      - checkout
+      - run: 
+          name: clone GH pages repo
+          command: git clone https://${GH_TOKEN}@github.com/domino-clj/domino-clj.github.io.git
+      - run:
+          name: build site
+          command: |
+            cd docs
+            lumo compile.cljs
+            cp -r out/* ../cryogen-project.github.io/
+      - run:
+          name: push to GH pages
+          command: |
+            cd ~/cryogen-project.github.io
+            git config user.email "carmen.wla@gmail.com"
+            git config user.name "Carmen La"
+            git add --all
+            git commit -a -m "$CIRCLE_BUILD_URL"
+            git push --force origin master
+      - store_artifacts:
+          path: out
+          destination: site-content
+
+workflows:
+  version: 2
+  deploy:
+    jobs:
+      - deploy-docs
