@@ -130,6 +130,8 @@ Finally, let's update the `:amount` to a value that triggers an effect.
 (reagent/render-component [button] js/klipse-container)
 </code></pre>
 
+This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with Reagent [here](https://domino-clj.github.io/demo).
+
 ## Possible Use Cases
 
 - UI state management
