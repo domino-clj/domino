@@ -2,18 +2,24 @@
   (:require
     [clojure.set :refer [map-invert]]))
 
+(defn normalize [path-segment]
+  (if (map? (second path-segment))
+    path-segment
+    (into [(first path-segment) {}] (rest path-segment))))
+
 (defn paths-by-id
   ([root] (paths-by-id {} [] root))
-  ([mapped-paths path [segment opts & children]]
-   (if segment
-     (let [path         (conj path segment)
-           mapped-paths (if-let [id (:id opts)]
-                          (assoc mapped-paths id path)
-                          mapped-paths)]
-       (if-not (empty? children)
-         (apply merge (map (partial paths-by-id mapped-paths path) children))
-         mapped-paths))
-     mapped-paths)))
+  ([mapped-paths path path-segment]
+   (let [[segment opts & children] (normalize path-segment)]
+     (if segment
+       (let [path         (conj path segment)
+             mapped-paths (if-let [id (:id opts)]
+                            (assoc mapped-paths id path)
+                            mapped-paths)]
+         (if-not (empty? children)
+           (apply merge (map (partial paths-by-id mapped-paths path) children))
+           mapped-paths))
+       mapped-paths))))
 
 (defn model->paths [model]
   (let [id->path (apply merge (map paths-by-id model))]

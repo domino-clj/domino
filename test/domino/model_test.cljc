@@ -27,9 +27,9 @@
                [:user {:id :user}
                 [:first-name {:id :fname}]
                 [:last-name {:id :lname}]
-                [:profile {}
+                [:profile
                  [:address {:id :address}
-                  [:street {}]
+                  [:street]
                   [:city {:id :city}]]]]]
         ctx   (model->paths model)]
 
