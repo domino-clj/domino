@@ -13,6 +13,7 @@ jobs:
           name: build site
           command: |
             cd docs
+            npm install
             lumo compile.cljs
             cp -r out/* ../cryogen-project.github.io/
       - run:
