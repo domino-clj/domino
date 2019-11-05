@@ -18,6 +18,14 @@
 (defn execute-effect! [{:domino.core/keys [db] :as ctx} {:keys [inputs handler]}]
   (handler ctx (map #(get-in db %) inputs)))
 
+(defn build-change-paths
+  [path]
+  (loop [paths []
+         path path]
+    (if (not-empty path)
+      (recur (conj paths (vec path)) (drop-last path))
+      paths)))
+
 (defn execute-effects!
   [{:keys [change-history] :domino.core/keys [effects] :as ctx}]
   (reduce
@@ -27,4 +35,6 @@
             (conj visited effect))
         visited))
     #{}
-    (change-effects effects (distinct (map first change-history))))) ;; TODO: double check this approach when changes is a sequential history
+    (->> (map first change-history)
+         (mapcat build-change-paths)
+         (change-effects effects)))) ;; TODO: double check this approach when changes is a sequential history
