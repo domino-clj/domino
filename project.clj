@@ -1,4 +1,4 @@
-(defproject domino/core "0.1.1"
+(defproject domino/core "0.2.0"
             :description "Clojure(script) data flow engine"
             :url "https://github.com/domino-clj/domino"
             :license {:name "Eclipse Public License"
@@ -21,6 +21,10 @@
    [:cljsbuild :builds :app :compiler :output-dir]
    [:cljsbuild :builds :app :compiler :output-to]]
 
+  :test-selectors {:default   (complement :benchmark)
+                   :benchmark :benchmark
+                   :all       (constantly true)}
+
   :profiles
   {:dev
    {:dependencies
@@ -36,7 +40,8 @@
      [cider/piggieback "0.4.0"]
      [figwheel-sidecar "0.5.19"]
      [cheshire "5.8.1"]
-     [pjstadig/humane-test-output "0.9.0"]]
+     [pjstadig/humane-test-output "0.9.0"]
+     [criterium "0.4.5"]]
 
     :injections [(require 'pjstadig.humane-test-output)
                  (pjstadig.humane-test-output/activate!)]
@@ -51,6 +56,7 @@
                         cider.nrepl/cider-middleware]
      :css-dirs         ["resources/public/css" "env/dev/resources/public/css"]
      :ring-handler     domino.server/app}
+
     :cljsbuild
     {:builds
      {:app
