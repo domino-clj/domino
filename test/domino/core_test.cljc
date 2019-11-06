@@ -67,3 +67,13 @@
     (is (= {:baz 1, :foo {:bar 2}, :buz 3} (:domino.core/db (transact ctx [[[:baz] 1]]))))
     (is (= {:bar 2} @result))))
 
+(deftest trigger-events-test
+  (let [ctx (initialize {:model  [[:n {:id :n}]
+                                  [:m {:id :m}]]
+                         :events [{:id      :match-n
+                                   :inputs  [:n]
+                                   :outputs [:m]
+                                   :handler (fn [_ {:keys [n]} _]
+                                              {:m n})}]}
+                        {:n 10 :m 0})]
+    (is (= {:n 10 :m 10} (:domino.core/db (trigger-events ctx [:match-n]))))))

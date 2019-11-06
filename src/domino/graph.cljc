@@ -231,3 +231,14 @@
                                 graph)]
     (assoc ctx :domino.core/db db
                :change-history changes)))
+
+(defn events-inputs-as-changes [{:domino.core/keys [events-by-id db]} event-ids]
+  (reduce
+    (fn [changes event-id]
+      (let [inputs (get-in events-by-id [event-id :inputs])]
+        (concat changes
+                (map (fn [path]
+                       [path (get-in db path)])
+                     inputs))))
+    []
+    event-ids))
