@@ -23,8 +23,7 @@
 
                             {:inputs [:user-hex]
                              :handler (fn [_ [user-hex]]
-                                        (swap! state assoc
-                                               :user-hex user-hex))}]
+                                        (swap! state assoc :user-hex user-hex))}]
 
                   :events  [{:inputs  [:fname :lname]
                              :outputs [:full-name]

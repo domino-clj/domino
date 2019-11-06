@@ -210,7 +210,6 @@
        new-ctx))))
 
 (defn execute-events [{:domino.core/keys [db graph] :as ctx} inputs]
-  (println inputs)
   (let [{::keys [db changes]} (eval-traversed-edges
                                 (reduce
                                   (fn [ctx [path value]]
