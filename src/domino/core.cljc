@@ -2,7 +2,8 @@
   (:require
     [domino.effects :as effects]
     [domino.graph :as graph]
-    [domino.model :as model]))
+    [domino.model :as model]
+    [domino.validation :as validation]))
 
 (defn initialize
   "Takes a schema of :model, :events, and :effects
@@ -20,7 +21,8 @@
     "
   ([schema]
    (initialize schema {}))
-  ([{:keys [model effects events]} initial-db]
+  ([{:keys [model effects events] :as schema} initial-db]
+   (validation/validate-schema! schema)
    (let [model  (model/model->paths model)
          events (model/connect model events)]
      {::model        model

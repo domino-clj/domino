@@ -6,7 +6,6 @@
   specified in the `:inputs` and `:outputs` vectors
 - event handler functions now must return a map with keys
   matching the keys specified in the `:outputs`
- - introduces `:pre` and `:post` conditions
- - triggering events via tags or ids  
-
-
+- introduces `:pre` and `:post` conditions
+- triggering events via tags or ids
+- add schema definition validation

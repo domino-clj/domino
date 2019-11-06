@@ -40,7 +40,7 @@
              true))))
 
 (deftest valid-ctx
-  (is (some? (validation/validate-context {:model   [[:user {:id :user}
+  (is (some? (validation/validate-schema! {:model   [[:user {:id :user}
                                                       [:first-name {:id :fname}]
                                                       [:last-name {:id :lname}]
                                                       [:full-name {:id :full-name}]]

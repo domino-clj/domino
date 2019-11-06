@@ -26,7 +26,7 @@
       events))
   ctx)
 
-(defn validate-context [ctx]
+(defn validate-schema! [ctx]
   (-> ctx
       valid-model?
       valid-events?))
