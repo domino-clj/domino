@@ -1,4 +1,5 @@
-(ns domino.effects)
+(ns domino.effects
+  (:require [domino.util :refer [generate-sub-paths]]))
 
 (defn effects-by-paths [effects]
   (reduce
@@ -18,14 +19,6 @@
 (defn execute-effect! [{:domino.core/keys [db] :as ctx} {:keys [inputs handler]}]
   (handler ctx (map #(get-in db %) inputs)))
 
-(defn build-change-paths
-  [path]
-  (loop [paths []
-         path path]
-    (if (not-empty path)
-      (recur (conj paths (vec path)) (drop-last path))
-      paths)))
-
 (defn execute-effects!
   [{:keys [change-history] :domino.core/keys [effects] :as ctx}]
   (reduce
@@ -36,5 +29,5 @@
         visited))
     #{}
     (->> (map first change-history)
-         (mapcat build-change-paths)
+         (mapcat generate-sub-paths)
          (change-effects effects)))) ;; TODO: double check this approach when changes is a sequential history
