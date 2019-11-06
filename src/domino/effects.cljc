@@ -30,4 +30,5 @@
     #{}
     (->> (map first change-history)
          (mapcat generate-sub-paths)
+         distinct
          (change-effects effects)))) ;; TODO: double check this approach when changes is a sequential history
