@@ -34,6 +34,7 @@
                          (if-let [id (:id event)]
                            (assoc events-by-id id event)
                            events-by-id))
+                       {}
                        events)
       ::effects      (effects/effects-by-paths (model/connect model effects))
       ::db           initial-db
@@ -47,3 +48,20 @@
   (let [updated-ctx (graph/execute-events ctx changes)]
     (effects/execute-effects! updated-ctx)
     updated-ctx))
+
+
+
+(defn trigger-events
+  "Triggers events by ids as opposed to data changes
+
+  Accepts the context, and a collection of event ids"
+  [{::keys [events-by-id db] :as ctx} event-ids]
+  (transact ctx (reduce
+                  (fn [changes event-id]
+                    (let [inputs (get-in events-by-id [event-id :inputs])]
+                      (concat changes
+                              (map (fn [path]
+                                     [path (get-in db path)])
+                                   inputs))))
+                  []
+                  event-ids)))

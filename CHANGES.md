@@ -7,6 +7,6 @@
   matching the keys specified in the `:outputs`
 - updated the model parser to handle segments without an options map
 - introduces `:pre` and `:post` conditions
-- triggering events via tags or ids
+- `trigger-events` fn added to domino.core, allowing triggering events via ids
 - add schema definition validation
 - validate for duplicate ids in model
