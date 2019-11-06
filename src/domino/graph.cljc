@@ -1,5 +1,6 @@
 (ns domino.graph
   (:require
+    [domino.util :refer [generate-sub-paths]]
     [clojure.set :refer [union]]))
 
 (def conj-set (fnil conj #{}))
@@ -170,7 +171,8 @@
             (fn [ctx [path old new]]
               (if (not= old new)
                 (-> ctx
-                    (update ::changed-paths (fnil conj empty-queue) path)
+                    (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+                                            (generate-sub-paths path))
                     (update ::db assoc-in path new)
                     (update ::changes conj [path new]))
                 ctx))
