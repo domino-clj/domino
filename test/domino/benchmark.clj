@@ -6,7 +6,7 @@
 
 (deftest ^:benchmark bench-initialize
   (criterium/bench
-    (core/initialize!
+    (core/initialize
       [{:inputs  [[:a]]
         :outputs [[:b] [:c]]
         :handler (fn [ctx [a] [b c]] [(+ a b) (+ a c)])}
@@ -15,7 +15,7 @@
         :handler (fn [ctx [c] _] [(inc c)])}])))
 
 (deftest ^:benchmark bench-transact
-  (let [ctx (core/initialize!
+  (let [ctx (core/initialize
               [{:inputs  [[:a]]
                 :outputs [[:b] [:c]]
                 :handler (fn [ctx [a] [b c]] [(+ a b) (+ a c)])}
