@@ -53,13 +53,5 @@
   "Triggers events by ids as opposed to data changes
 
   Accepts the context, and a collection of event ids"
-  [{::keys [events-by-id db] :as ctx} event-ids]
-  (transact ctx (reduce
-                  (fn [changes event-id]
-                    (let [inputs (get-in events-by-id [event-id :inputs])]
-                      (concat changes
-                              (map (fn [path]
-                                     [path (get-in db path)])
-                                   inputs))))
-                  []
-                  event-ids)))
+  [ctx event-ids]
+  (transact ctx (graph/events-inputs-as-changes ctx event-ids)))
