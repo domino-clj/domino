@@ -20,7 +20,7 @@
                                               :full-name full-name))}]
                  :events  [{:inputs  [:fname :lname]
                             :outputs [:full-name]
-                            :handler (fn [_ [fname lname] _]
+                            :handler (fn [_ {:keys [fname lname]} _]
                                        [(or (when (and fname lname) (str lname ", " fname))
                                             fname
                                             lname)])}]}
@@ -34,17 +34,18 @@
     (swap! ctx transact [[[:user :last-name] "Bobberton"]])
     (is (= {:first-name "Bob" :last-name "Bobberton" :full-name "Bobberton, Bob"} @external-state))))
 
-(let [ctx (initialize {:model  [[:demograpics
-                                 {:id :foo}
-                                 [:first-name {:id :fname}]
-                                 [:last-name {:id :lname}]
-                                 [:full-name {:id :full-name}]]]
-                       :events [{:inputs  [:fname :lname]
-                                 :outputs [:full-name]
-                                 :handler (fn [_ [fname lname] _]
-                                            [(or (when (and fname lname) (str lname ", " fname))
-                                                 fname
-                                                 lname)])}]}
-                      {})]
-  (:domino.core/db (transact ctx [[[:demographics :first-name] "Bob"]])))
+(comment
+  (let [ctx (initialize {:model  [[:demographics
+                                   {:id :foo}
+                                   [:first-name {:id :fname}]
+                                   [:last-name {:id :lname}]
+                                   [:full-name {:id :full-name}]]]
+                         :events [{:inputs  [:fname :lname]
+                                   :outputs [:full-name]
+                                   :handler (fn [_ {:keys [fname lname]} _]
+                                              [(or (when (and fname lname) (str lname ", " fname))
+                                                   fname
+                                                   lname)])}]}
+                        {})]
+    (:domino.core/db (transact ctx [[[:demographics :first-name] "Bobs"]]))))
 

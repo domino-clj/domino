@@ -33,7 +33,7 @@ The handler accepts three arguments: a context containing the current state of t
 ```clojure
 {:inputs  [:amount]
  :outputs [:total]
- :handler (fn [ctx [amount] [total]]
+ :handler (fn [ctx {:keys [amount]} {:keys [total]}]
             [(+ total amount)])}
 ```
 
@@ -45,7 +45,7 @@ The handler accepts two arguments: a context containing the current state of the
 
 ```clojure
 {:inputs [:total]
- :handler (fn [ctx [total]]
+ :handler (fn [ctx {:keys [total]}]
             (when (> total 1337)
               (println "Woah. That's a lot.")))}
 ```
