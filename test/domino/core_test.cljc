@@ -13,7 +13,7 @@
                             [:last-name {:id :lname}]
                             [:full-name {:id :full-name}]]]
                  :effects [{:inputs  [:fname :lname :full-name]
-                            :handler (fn [_ [fname lname full-name]]
+                            :handler (fn [_ {:keys [fname lname full-name]}]
                                        (swap! state assoc
                                               :first-name fname
                                               :last-name lname
@@ -21,9 +21,9 @@
                  :events  [{:inputs  [:fname :lname]
                             :outputs [:full-name]
                             :handler (fn [_ {:keys [fname lname]} _]
-                                       [(or (when (and fname lname) (str lname ", " fname))
-                                            fname
-                                            lname)])}]}
+                                       {:full-name (or (when (and fname lname) (str lname ", " fname))
+                                                       fname
+                                                       lname)})}]}
                 {})))
 
 (deftest transaction-test
@@ -43,9 +43,10 @@
                          :events [{:inputs  [:fname :lname]
                                    :outputs [:full-name]
                                    :handler (fn [_ {:keys [fname lname]} _]
-                                              [(or (when (and fname lname) (str lname ", " fname))
-                                                   fname
-                                                   lname)])}]}
+                                              {:full-name (or (when (and fname lname) (str lname ", " fname))
+                                                              fname
+                                                              lname)})}]}
                         {})]
-    (:domino.core/db (transact ctx [[[:demographics :first-name] "Bobs"]]))))
+    (:domino.core/db (transact ctx [[[:demographics :first-name] "Bobs"]
+                                    [[:demographics :last-name] "Bobberton"]]))))
 

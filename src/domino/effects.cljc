@@ -1,4 +1,6 @@
-(ns domino.effects)
+(ns domino.effects
+  (:require
+    [domino.graph :as graph]))
 
 (defn effects-by-paths [effects]
   (reduce
@@ -15,8 +17,8 @@
   (mapcat (fn [path] (get effects path))
           changes))
 
-(defn execute-effect! [{:domino.core/keys [db] :as ctx} {:keys [inputs handler]}]
-  (handler ctx (map #(get-in db %) inputs)))
+(defn execute-effect! [{:domino.core/keys [model db] :as ctx} {:keys [inputs handler]}]
+  (handler ctx (graph/get-db-paths model db inputs)))
 
 (defn execute-effects!
   [{:keys [change-history] :domino.core/keys [effects] :as ctx}]

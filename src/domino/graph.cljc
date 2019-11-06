@@ -1,5 +1,6 @@
 (ns domino.graph
   (:require
+    [domino.model :as model]
     [clojure.set :refer [union]]))
 
 (def conj-set (fnil conj #{}))
@@ -126,7 +127,7 @@
 (defn get-db-paths [model db paths]
   (reduce
     (fn [id->value path]
-      (assoc id->value (get-in model [:path->id path])  (get-in db path)))
+      (assoc id->value (model/id-for-path model path) (get-in db path)))
     {}
     paths))
 
@@ -157,7 +158,7 @@
   ::changed-paths => queue of affected paths
   ::db => temporary relevant db within context
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
-  [edges {::keys [db executed-events] :as ctx}]
+  [edges {::keys [db executed-events] :domino.core/keys [model] :as ctx}]
   (reduce
     (fn [ctx {{:keys [outputs] :as event} :edge}]
       (if (contains? executed-events event)
@@ -165,21 +166,17 @@
         (let [ctx         (update ctx ::executed-events conj event)
               old-outputs (get-db-paths (:domino.core/model ctx) db outputs)
               new-outputs (try-event event ctx db old-outputs)]
-          (when-not (= (count outputs) (count new-outputs))
-            (throw
-              (ex-info "number of outputs returned by the handler must match the number of declared outputs"
-                       {:declared-outputs outputs
-                        :outputs          new-outputs})))
-          (reduce
-            (fn [ctx [path old new]]
-              (if (not= old new)
-                (-> ctx
+          (reduce-kv
+            (fn [ctx id new-value]
+              (if (not= (get old-outputs id) new-value)
+                (let [path (get-in model [:id->path id])]
+                  (-> ctx
                     (update ::changed-paths (fnil conj empty-queue) path)
-                    (update ::db assoc-in path new)
-                    (update ::changes conj [path new]))
+                    (update ::db assoc-in path new-value)
+                    (update ::changes conj [path new-value])))
                 ctx))
             ctx
-            (map vector outputs old-outputs new-outputs)))))
+            new-outputs))))
     ctx
     edges))
 
