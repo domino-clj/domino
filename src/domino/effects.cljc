@@ -1,6 +1,7 @@
 (ns domino.effects
   (:require
-    [domino.graph :as graph]))
+    [domino.graph :as graph]
+    [domino.util :refer [generate-sub-paths]]))
 
 (defn effects-by-paths [effects]
   (reduce
@@ -29,4 +30,7 @@
             (conj visited effect))
         visited))
     #{}
-    (change-effects effects (distinct (map first change-history))))) ;; TODO: double check this approach when changes is a sequential history
+    (->> (map first change-history)
+         (mapcat generate-sub-paths)
+         distinct
+         (change-effects effects))))                        ;; TODO: double check this approach when changes is a sequential history

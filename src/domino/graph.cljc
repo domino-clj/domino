@@ -1,6 +1,7 @@
 (ns domino.graph
   (:require
     [domino.model :as model]
+    [domino.util :refer [generate-sub-paths]]
     [clojure.set :refer [union]]))
 
 (def conj-set (fnil conj #{}))
@@ -168,12 +169,14 @@
               new-outputs (try-event event ctx db old-outputs)]
           (reduce-kv
             (fn [ctx id new-value]
+              ;;todo validate that the id matches an ide declared in outputs
               (if (not= (get old-outputs id) new-value)
                 (let [path (get-in model [:id->path id])]
                   (-> ctx
-                    (update ::changed-paths (fnil conj empty-queue) path)
-                    (update ::db assoc-in path new-value)
-                    (update ::changes conj [path new-value])))
+                      (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+                              (generate-sub-paths path))
+                      (update ::db assoc-in path new-value)
+                      (update ::changes conj [path new-value])))
                 ctx))
             ctx
             new-outputs))))

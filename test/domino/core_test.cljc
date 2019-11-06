@@ -11,19 +11,30 @@
     (initialize {:model   [[:user {:id :user}
                             [:first-name {:id :fname}]
                             [:last-name {:id :lname}]
-                            [:full-name {:id :full-name}]]]
+                            [:full-name {:id :full-name}]]
+                           [:user-hex {:id :user-hex}]]
                  :effects [{:inputs  [:fname :lname :full-name]
                             :handler (fn [_ {:keys [fname lname full-name]}]
                                        (swap! state assoc
                                               :first-name fname
                                               :last-name lname
-                                              :full-name full-name))}]
+                                              :full-name full-name))}
+                           {:inputs  [:user-hex]
+                            :handler (fn [_ {:keys [user-hex]}]
+                                       (swap! state assoc :user-hex user-hex))}]
                  :events  [{:inputs  [:fname :lname]
                             :outputs [:full-name]
                             :handler (fn [_ {:keys [fname lname]} _]
                                        {:full-name (or (when (and fname lname) (str lname ", " fname))
                                                        fname
-                                                       lname)})}]}
+                                                       lname)})}
+                           {:inputs  [:user]
+                            :outputs [:user-hex]
+                            :handler (fn [_ [{:keys [first-name last-name full-name]
+                                              :or   {first-name "" last-name "" full-name ""}}] _]
+                                       [(->> (str first-name last-name full-name)
+                                             (map #(format "%02x" (int %)))
+                                             (apply str))])}]}
                 {})))
 
 (deftest transaction-test
@@ -34,19 +45,23 @@
     (swap! ctx transact [[[:user :last-name] "Bobberton"]])
     (is (= {:first-name "Bob" :last-name "Bobberton" :full-name "Bobberton, Bob"} @external-state))))
 
-(comment
-  (let [ctx (initialize {:model  [[:demographics
-                                   {:id :foo}
-                                   [:first-name {:id :fname}]
-                                   [:last-name {:id :lname}]
-                                   [:full-name {:id :full-name}]]]
-                         :events [{:inputs  [:fname :lname]
-                                   :outputs [:full-name]
-                                   :handler (fn [_ {:keys [fname lname]} _]
-                                              {:full-name (or (when (and fname lname) (str lname ", " fname))
-                                                              fname
-                                                              lname)})}]}
-                        {})]
-    (:domino.core/db (transact ctx [[[:demographics :first-name] "Bobs"]
-                                    [[:demographics :last-name] "Bobberton"]]))))
+(deftest triggering-parent-test
+  (let [result (atom nil)
+        ctx    (initialize {:model   [[:foo {:id :foo}
+                                       [:bar {:id :bar}]]
+                                      [:baz {:id :baz}]
+                                      [:buz {:id :buz}]]
+                            :events  [{:inputs  [:baz]
+                                       :outputs [:bar]
+                                       :handler (fn [ctx {:keys [baz]} _]
+                                                  {:bar (inc baz)})}
+                                      {:inputs  [:foo]
+                                       :outputs [:buz]
+                                       :handler (fn [ctx {:keys [foo]} _]
+                                                  {:buz (inc (:bar foo))})}]
+                            :effects [{:inputs  [:foo]
+                                       :handler (fn [ctx {:keys [foo]}]
+                                                  (reset! result foo))}]})]
+    (is (= {:baz 1, :foo {:bar 2}, :buz 3} (:domino.core/db (transact ctx [[[:baz] 1]]))))
+    (is (= {:bar 2} @result))))
 

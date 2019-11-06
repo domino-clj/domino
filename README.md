@@ -67,10 +67,10 @@ Let's take a look at a simple engine that accumulates a total. Whenever an amoun
              [:total {:id :total}]]
    :events  [{:inputs  [:amount]
               :outputs [:total]
-              :handler (fn [ctx [amount] [total]]
+              :handler (fn [ctx {:keys [amount]} {:keys [total]}]
                          [(+ total amount)])}]
    :effects [{:inputs [:total]
-              :handler (fn [ctx [total]]
+              :handler (fn [ctx {:keys [total]}]
                          (when (> total 1337)
                            (js/alert "Woah. That's a lot.")))}]})
 ```
