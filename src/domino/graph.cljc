@@ -228,7 +228,7 @@
     (assoc ctx :domino.core/db db
                :change-history changes)))
 
-(defn events-inputs-as-changes [{::keys [events-by-id db]} event-ids]
+(defn events-inputs-as-changes [{:domino.core/keys [events-by-id db]} event-ids]
   (reduce
     (fn [changes event-id]
       (let [inputs (get-in events-by-id [event-id :inputs])]
