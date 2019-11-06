@@ -49,8 +49,6 @@
     (effects/execute-effects! updated-ctx)
     updated-ctx))
 
-
-
 (defn trigger-events
   "Triggers events by ids as opposed to data changes
 
