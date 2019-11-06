@@ -36,7 +36,7 @@
 
 ;;================= MAIN ============================
 (let [readme (slurp (path ".." "README.md"))
-      docs (fs/readdirSync "md" #js{:encoding "UTF-8"})]
+      docs (try (fs/readdirSync "md" #js{:encoding "UTF-8"}) (catch js/Error _))]
   
   (spit
    (path "out" "index.html")

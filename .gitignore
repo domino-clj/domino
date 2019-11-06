@@ -8,3 +8,4 @@ figwheel_server.log
 .lein-repl-history
 pom.xml
 node_modules/
+docs/out/*.html
