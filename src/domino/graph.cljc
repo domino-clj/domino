@@ -1,5 +1,6 @@
 (ns domino.graph
   (:require
+    [domino.model :as model]
     [domino.util :refer [generate-sub-paths]]
     [clojure.set :refer [union]]))
 
@@ -124,8 +125,12 @@
 
 
 ;;;
-(defn get-db-paths [db paths]
-  (map #(get-in db %) paths))
+(defn get-db-paths [model db paths]
+  (reduce
+    (fn [id->value path]
+      (assoc id->value (model/id-for-path model path) (get-in db path)))
+    {}
+    paths))
 
 (def empty-queue
   #?(:clj  clojure.lang.PersistentQueue/EMPTY
@@ -137,10 +142,10 @@
      (.write writer
              (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
-(defn try-event [{:keys [handler inputs] :as event} ctx db old-outputs]
+(defn try-event [{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs]
   (try
     (or
-      (handler ctx (get-db-paths db inputs) old-outputs)
+      (handler ctx (get-db-paths model db inputs) old-outputs)
       old-outputs)
     (catch #?(:clj Exception :cljs js/Error) e
       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
@@ -154,30 +159,27 @@
   ::changed-paths => queue of affected paths
   ::db => temporary relevant db within context
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
-  [edges {::keys [db executed-events] :as ctx}]
+  [edges {::keys [db executed-events] :domino.core/keys [model] :as ctx}]
   (reduce
-    (fn [ctx {{:keys [inputs outputs handler] :as event} :edge}]
+    (fn [ctx {{:keys [outputs] :as event} :edge}]
       (if (contains? executed-events event)
         ctx
         (let [ctx         (update ctx ::executed-events conj event)
-              old-outputs (get-db-paths db outputs)
+              old-outputs (get-db-paths (:domino.core/model ctx) db outputs)
               new-outputs (try-event event ctx db old-outputs)]
-          (when-not (= (count outputs) (count new-outputs))
-            (throw
-              (ex-info "number of outputs returned by the handler must match the number of declared outputs"
-                       {:declared-outputs outputs
-                        :outputs          new-outputs})))
-          (reduce
-            (fn [ctx [path old new]]
-              (if (not= old new)
-                (-> ctx
-                    (update ::changed-paths (fnil (partial reduce conj) empty-queue)
-                                            (generate-sub-paths path))
-                    (update ::db assoc-in path new)
-                    (update ::changes conj [path new]))
+          (reduce-kv
+            (fn [ctx id new-value]
+              ;;todo validate that the id matches an ide declared in outputs
+              (if (not= (get old-outputs id) new-value)
+                (let [path (get-in model [:id->path id])]
+                  (-> ctx
+                      (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+                              (generate-sub-paths path))
+                      (update ::db assoc-in path new-value)
+                      (update ::changes conj [path new-value])))
                 ctx))
             ctx
-            (map vector outputs old-outputs new-outputs)))))
+            new-outputs))))
     ctx
     edges))
 
@@ -208,9 +210,6 @@
      (if x
        (recur (assoc new-ctx ::changed-paths xs) removed-origin x)
        new-ctx))))
-
-(defn trigger-event [{:domino.core/keys [db graph] :as ctx} event-id]
-  ())
 
 (defn execute-events [{:domino.core/keys [db graph] :as ctx} inputs]
   (let [{::keys [db changes]} (eval-traversed-edges

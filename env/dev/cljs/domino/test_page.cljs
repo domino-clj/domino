@@ -3,21 +3,6 @@
             [reagent.core :as r]
             [cljs.pprint :refer [pprint]]))
 
-(defn gen-effects
-  "automatically generate default effects for each set of outputs"
-  [{:keys [events] :as model}]
-  (update model
-          :effects
-          (fnil into [])
-          (reduce
-            (fn [effects {:keys [outputs]}]
-              (conj
-                effects
-                {:inputs  outputs
-                 :handler (fn [_ output-values])}))
-            []
-            events)))
-
 (def ctx
   (r/atom
     (let [model {:model
@@ -32,22 +17,22 @@
                    [:first-name {:id :physician-fname}]]]
                  :effects
                  [{:inputs  [:full-name]
-                   :handler (fn [_ [full-name]]
+                   :handler (fn [_ {:keys [full-name]}]
                               (when (= "Bobberton, Bob" full-name)
                                 (js/alert "launching missiles!")))}]
                  :events
                  [{:inputs  [:fname :lname]
                    :outputs [:full-name]
-                   :handler (fn [_ [fname lname] _]
-                              [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}
+                   :handler (fn [_ {:keys [fname lname]} _]
+                              {:full-name (or (when (and fname lname) (str lname ", " fname)) fname lname)})}
                   {:inputs  [:kg]
                    :outputs [:lb]
-                   :handler (fn [_ [kg] _]
-                              [(* kg 2.20462)])}
+                   :handler (fn [_ {:keys [kg]} _]
+                              {:lb (* kg 2.20462)})}
                   {:inputs  [:lb]
                    :outputs [:kg]
-                   :handler (fn [_ [lb] _]
-                              [(/ lb 2.20462)])}]}]
+                   :handler (fn [_ {:keys [lb]} _]
+                              {:kg (/ lb 2.20462)})}]}]
       (core/initialize model {}))))
 
 (defn transact [path value]

@@ -33,6 +33,11 @@
         id
         (recur (butlast path-segment))))))
 
+;;TODO path segment options can contain :pre and :post keys
+;;attach these to the handler map, and check them when running the handler
+
+;;TODO ensure all keys are unique!
+
 (defn connect [{:keys [id->path]} events]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv

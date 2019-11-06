@@ -41,7 +41,8 @@
      [figwheel-sidecar "0.5.19"]
      [cheshire "5.8.1"]
      [pjstadig/humane-test-output "0.9.0"]
-     [criterium "0.4.5"]]
+     [criterium "0.4.5"]
+     [org.clojure/tools.namespace "0.3.1"]]
 
     :injections [(require 'pjstadig.humane-test-output)
                  (pjstadig.humane-test-output/activate!)]
