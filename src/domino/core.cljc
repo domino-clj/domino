@@ -22,7 +22,9 @@
   ([schema]
    (initialize schema {}))
   ([{:keys [model effects events] :as schema} initial-db]
-   (validation/validate-schema! schema)
+   ;; Validate schema
+   (validation/maybe-throw-exception (validation/validate-schema schema))
+   ;; Construct ctx
    (let [model  (model/model->paths model)
          events (model/connect model events)]
      {::model        model
