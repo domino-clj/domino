@@ -14,7 +14,8 @@
      (if segment
        (let [path         (conj path segment)
              mapped-paths (if-let [id (:id opts)]
-                            (assoc mapped-paths id path)
+                            (assoc mapped-paths id {:path path
+                                                    :opts opts})
                             mapped-paths)]
          (if-not (empty? children)
            (apply merge (map (partial paths-by-id mapped-paths path) children))
@@ -22,9 +23,14 @@
        mapped-paths))))
 
 (defn model->paths [model]
-  (let [id->path (apply merge (map paths-by-id model))]
-    {:id->path id->path
-     :path->id (map-invert id->path)}))
+  (reduce
+    (fn [model [id {:keys [path opts]}]]
+      (-> model
+          (update :id->path assoc id path)
+          (update :path->id assoc path id)
+          (update :id->opts assoc id opts)))
+    {}
+    (apply merge (map paths-by-id model))))
 
 (defn id-for-path [{:keys [path->id]} path]
   (loop [path-segment path]
@@ -36,8 +42,15 @@
 ;;TODO path segment options can contain :pre and :post keys
 ;;attach these to the handler map, and check them when running the handler
 
-;;TODO ensure all keys are unique!
+(defn wrap [handler interceptors]
+  (let [[interceptor & interceptors] (reverse interceptors)]
+    (reduce
+      (fn [handler interceptor]
+        (interceptor handler))
+      (interceptor handler)
+      interceptors)))
 
+;;TODO ensure all keys are unique!
 (defn connect [{:keys [id->path]} events]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv
