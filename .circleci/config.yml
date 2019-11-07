@@ -2,37 +2,43 @@ version: 2
 
 jobs:
   deploy-docs:
-    docker: 
+    docker:
       - image: circleci/node:latest
     steps:
       - checkout
       - run:
-          name: build site
+          name: build site?
           command: |
-            cd docs
-            npm install
-            npx lumo compile.cljs
-      - run: 
-          name: clone GH pages repo
-          command: git clone https://${GH_TOKEN}@github.com/domino-clj/domino-clj.github.io.git
-      - run:
-          name: copy files to GH pages repo
-          command: cp -r docs/out/* domino-clj.github.io/
-      - run:
-          name: push to GH pages
-          command: |
-            cd domino-clj.github.io
-            git config user.email "carmen.wla@gmail.com"
-            git config user.name "Carmen La"
-            git add --all
-            git commit -a -m "$CIRCLE_BUILD_URL"
-            git push --force origin master
-      - store_artifacts:
-          path: out
-          destination: site-content
+            COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | sed 's:^.*/compare/::g')
+            echo "Commit range" $COMMIT_RANGE
+            echo "Changed files:"
+            git diff --name-only $COMMIT_RANGE
+            echo
+            if [[ $(git diff --name-only $COMMIT_RANGE | grep -E '^(README.md|docs/|\.circleci/config.yml)') != "" ]]
+            then
+              echo "Building docs"
+              cd docs
+              npm install
+              npx lumo compile.cljs
+              echo
+              git clone https://${GH_TOKEN}@github.com/domino-clj/domino-clj.github.io.git
+              echo
+              echo "Copying files to GH pages repo"
+              cp -r out/* domino-clj.github.io/
+              cd domino-clj.github.io
+              git config user.email "carmen.wla@gmail.com"
+              git config user.name "Carmen La"
+              git diff-index --quiet HEAD || (git add --all && git commit -am "$CIRCLE_BUILD_URL" && git push --force origin master)
+            else
+              echo "No changes to docs/ folder or README.md, ending build"
+            fi
 
 workflows:
   version: 2
   deploy:
     jobs:
-      - deploy-docs
+      - deploy-docs:
+          filters:
+            branches:
+              only:
+                - master

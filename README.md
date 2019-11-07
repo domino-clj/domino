@@ -16,9 +16,9 @@ Domino consists of three main concepts:
 
 **1. Model**
 
-The model represents the paths within an EDN data structure. These paths will typically represent fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key. 
+The model represents the paths within an EDN data structure. These paths will typically represent fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key.
 
-For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition: 
+For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition:
 
 ```clojure
 [[:patient [:first-name {:id :fname}]]]
@@ -26,7 +26,7 @@ For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key wi
 
 **2. Events**
 
-The events define the business logic associated with the changes of the model. Whenever a value is transacted, associated events are computed. Events are defined by three keys; an `:inputs` vector, an `:outputs` vector, and a `:handler` function. 
+The events define the business logic associated with the changes of the model. Whenever a value is transacted, associated events are computed. Events are defined by three keys; an `:inputs` vector, an `:outputs` vector, and a `:handler` function.
 
 The handler accepts three arguments: a context containing the current state of the engine, a list of the input values, and a list of the output values. The function should produce a vector of outputs matching the declared `:outputs` key. For example:
 
@@ -39,7 +39,7 @@ The handler accepts three arguments: a context containing the current state of t
 
 **3. Effects**
 
-Effects are executed after events have been transacted and the new context is produced. Effects are defined as a map of `:inputs` and a `:handler` function. 
+Effects are executed after events have been transacted and the new context is produced. Effects are defined as a map of `:inputs` and a `:handler` function.
 
 The handler accepts two arguments: a context containing the current state of the engine, and a list of input values. The effects do not cascade. For example:
 
@@ -82,7 +82,7 @@ This schema declaration is a map containing three keys:
 * The `:events` key contains pure functions that represent events that are triggered when their inputs change. The events produce updated values that are persisted in the state.
 * The `:effects` key contains the functions that produce side effects based on the updated state.
 
-Using a unified model referenced by the event functions allows us to easily tell how a particular piece of business logic is triggered. 
+Using a unified model referenced by the event functions allows us to easily tell how a particular piece of business logic is triggered.
 
 The event engine generates a direct acyclic graph (DAG) based on the `:input` keys declared by each event that's used to compute the new state in a transaction. This approach removes any ambiguity regarding when and how business logic is executed.
 
@@ -193,7 +193,7 @@ There is a demo front-end test page under `env/dev/cljs/domino/test_page.cljs`
 
 ## License
 
-Copyright © 2019 
+Copyright © 2019
 
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+Distributed under the Eclipse Public License either version 1.0 or (at your option) any later version.
+
