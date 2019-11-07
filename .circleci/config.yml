@@ -7,6 +7,12 @@ jobs:
     steps:
       - checkout
       - run:
+          name: check if docs/ changed
+          command: |
+            COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | sed 's:^.*/compare/::g')
+            echo "Commit range" $COMMIT_RANGE
+            git diff --name-only $COMMIT_RANGE | grep -qE '^(docs/|\.circleci/config.yml)' || exit
+      - run:
           name: build site
           command: |
             cd docs
