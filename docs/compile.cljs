@@ -4,9 +4,9 @@
    [cljs.tools.reader :as reader :refer [read]]
    [cljs.tools.reader.reader-types :refer [string-push-back-reader read-char]]
    [clojure.string :as string]
+   [markdown.core :as markdown]
    ["fs" :as fs]
-   ["nunjucks" :as nj]
-   ["marked" :as marked])
+   ["nunjucks" :as nj])
   (:import goog.string.StringBuffer))
 
 (nj/configure "templates")
@@ -28,8 +28,7 @@
       (str s))))
 
 (defn md->html [s]
-  (marked/parse s #js{:headerIds false}))
-;; todo: figure out how to provide custom renderer
+  (markdown/md->html s))
 
 (defn path [& args]
   (clojure.string/join "/" (remove nil? args)))
