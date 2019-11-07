@@ -34,7 +34,7 @@ The handler accepts three arguments: a context containing the current state of t
 {:inputs  [:amount]
  :outputs [:total]
  :handler (fn [ctx {:keys [amount]} {:keys [total]}]
-            [(+ total amount)])}
+            {:total (+ total amount)})}
 ```
 
 **3. Effects**
@@ -65,10 +65,11 @@ Let's take a look at a simple engine that accumulates a total. Whenever an amoun
 (def schema
   {:model   [[:amount {:id :amount}]
              [:total {:id :total}]]
-   :events  [{:inputs  [:amount]
+   :events  [{:id      :update-total 
+              :inputs  [:amount]
               :outputs [:total]
               :handler (fn [ctx {:keys [amount]} {:keys [total]}]
-                         [(+ total amount)])}]
+                         {:total (+ total amount)})}]
    :effects [{:inputs [:total]
               :handler (fn [ctx {:keys [total]}]
                          (when (> total 1337)
@@ -130,6 +131,48 @@ Finally, let's update the `:amount` to a value that triggers an effect.
 (reagent/render-component [button] js/klipse-container)
 </code></pre>
 
+### Interceptors
+
+Domino provides the ability to add interceptors pre and post event execution. Interceptors are defined in the schema's model. If there are multiple interceptors applicable, they are composed together.
+
+In the metadata map for a model key, you can add a `:pre` and `:post` key to define these interceptors. Below are some examples
+
+```clojure
+{:model  [[:foo {:id  :foo
+           :pre [(fn [handler]
+                   (fn [ctx inputs outputs]
+                     (handler ctx
+                              (assoc inputs :bar 5)
+                              outputs)))]
+           :post [(fn [handler]
+                    (fn [result]
+                      (handler (update result :bar inc))))]}]]}
+```
+
+With interceptors, you can also short circuit an event, wherein you prevent handler execution by returning nil. For example
+
+```clojure
+{:model  [[:foo {:id  :foo
+           :pre [(fn [handler]
+                   (fn [ctx {:keys [baz] :as inputs} outputs]
+                     (when (> baz 2)
+                       (handler ctx inputs outputs))
+                     ;; returning nil prevents handler execution
+                     ))]}]]}
+```
+
+### Triggering Events
+
+Occasionally, there may be a use case where you would want to trigger an event directly without transacting updated state. Events, optionally, can have an id key associated with them. This is how you would be able to reference the event from trigger-events. 
+
+For example, this might happen when a button is clicked and you want a value to increment. This can be accomplished with a call to `trigger-events`.
+
+`trigger-events` takes a list of events that you would like trigger and calls `transact` with the current state of the data from all the inputs of the events. For example:
+
+```clojure
+(domino.core/trigger-events ctx [:increment-total])
+```
+
 This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with Reagent [here](https://domino-clj.github.io/demo).
 
 ## Possible Use Cases
@@ -146,6 +189,7 @@ There is a demo front-end test page under `env/dev/cljs/domino/test_page.cljs`
 
 - [re-frame](https://github.com/Day8/re-frame)
 - [javelin](https://github.com/hoplon/javelin)
+- [reitit](https://github.com/metosin/reitit)
 
 ## License
 
