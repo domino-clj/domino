@@ -28,7 +28,7 @@ jobs:
               cd domino-clj.github.io
               git config user.email "carmen.wla@gmail.com"
               git config user.name "Carmen La"
-              git diff-index --quiet HEAD || git add --all && git commit -am "$CIRCLE_BUILD_URL" && git push --force origin master
+              git diff-index --quiet HEAD || (git add --all && git commit -am "$CIRCLE_BUILD_URL" && git push --force origin master)
             else
               echo "No changes to docs/ folder, ending build"
             fi
