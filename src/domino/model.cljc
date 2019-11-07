@@ -73,6 +73,7 @@
       (fn [ctx inputs outputs]
         (post (handler ctx inputs outputs))))))
 
+;;todo ensure that :pre/:post from all the parent path segments are included as well
 (defn ids-to-interceptors [id->opts ids k]
   (->> ids
        (mapcat #(get-in id->opts [% k]))
