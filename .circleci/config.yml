@@ -11,7 +11,7 @@ jobs:
           command: |
             COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | sed 's:^.*/compare/::g')
             echo "Commit range" $COMMIT_RANGE
-            git diff --name-only $COMMIT_RANGE | grep -qE '^(docs/|\.circleci/config.yml)' || exit
+            git diff --name-only $COMMIT_RANGE | grep -qE '^(docs/|\.circleci/config.yml)' || exit 0
       - run:
           name: build site
           command: |
