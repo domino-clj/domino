@@ -141,16 +141,11 @@
      [queue writer]
      (.write writer (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
-(defn try-event [{:keys [pre post handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs]
+(defn try-event [{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs]
   (try
-    (let [db-inputs (get-db-paths model db inputs)]
-      (or
-        (cond
-          (and pre post) (post (pre handler ctx db-inputs old-outputs))
-          pre (pre handler ctx db-inputs old-outputs)
-          post (post (handler ctx db-inputs old-outputs))
-          :else (handler ctx db-inputs old-outputs))
-        old-outputs))
+    (or
+      (handler ctx (get-db-paths model db inputs) old-outputs)
+      old-outputs)
     (catch #?(:clj Exception :cljs js/Error) e
       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
 

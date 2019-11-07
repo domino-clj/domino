@@ -77,3 +77,53 @@
                                               {:m n})}]}
                         {:n 10 :m 0})]
     (is (= {:n 10 :m 10} (:domino.core/db (trigger-events ctx [:match-n]))))))
+
+(deftest pre-post-interceptors
+  (let [result (atom nil)
+        ctx    (initialize {:model   [[:foo {:id  :foo
+                                             :pre [(fn [handler]
+                                                     (fn [ctx inputs outputs]
+                                                       (handler ctx inputs outputs)))
+                                                   (fn [handler]
+                                                     (fn [ctx inputs outputs]
+                                                       (handler ctx inputs outputs)))]}
+                                       [:bar {:id :bar}]]
+                                      [:baz {:id   :baz
+                                             :pre  [(fn [handler]
+                                                      (fn [ctx inputs outputs]
+                                                        (handler ctx inputs outputs)))]
+                                             :post [(fn [handler]
+                                                      (fn [result]
+                                                        (handler (update result :buz inc))))]}]
+                                      [:buz {:id :buz}]]
+                            :events  [{:inputs  [:foo :baz]
+                                       :outputs [:buz]
+                                       :handler (fn [ctx {:keys [baz]} _]
+                                                  {:buz (inc baz)})}]
+                            :effects [{:inputs  [:buz]
+                                       :handler (fn [ctx {:keys [buz]}]
+                                                  (reset! result buz))}]})]
+    (is (= {:baz 1 :buz 3} (:domino.core/db (transact ctx [[[:baz] 1]]))))
+    (is (= 3 @result))))
+
+(deftest interceptor-short-circuit
+  (let [result (atom nil)
+        ctx    (initialize {:model   [[:foo {:id  :foo
+                                             :pre [(fn [handler]
+                                                     (fn [ctx {:keys [baz] :as inputs} outputs]
+                                                       (when (> baz 2)
+                                                         (handler ctx inputs outputs))
+                                                       ;; returning nil prevents handler execution
+                                                       ))]}
+                                       [:bar {:id :bar}]]
+                                      [:baz {:id   :baz}]
+                                      [:buz {:id :buz}]]
+                            :events  [{:inputs  [:foo :baz]
+                                       :outputs [:buz]
+                                       :handler (fn [ctx {:keys [baz]} _]
+                                                  {:buz (inc baz)})}]
+                            :effects [{:inputs  [:buz]
+                                       :handler (fn [ctx {:keys [buz]}]
+                                                  (reset! result buz))}]})]
+    (is (= {:baz 1} (:domino.core/db (transact ctx [[[:baz] 1]]))))
+    (is (nil? @result))))

@@ -26,7 +26,7 @@
    (validation/maybe-throw-exception (validation/validate-schema schema))
    ;; Construct ctx
    (let [model  (model/model->paths model)
-         events (model/connect model events)]
+         events (model/connect-events model events)]
      {::model        model
       ::events       events
       ::events-by-id (reduce
@@ -36,7 +36,7 @@
                            events-by-id))
                        {}
                        events)
-      ::effects      (effects/effects-by-paths (model/connect model effects))
+      ::effects      (effects/effects-by-paths (model/connect-effects model effects))
       ::db           initial-db
       ::graph        (graph/gen-ev-graph events)})))
 

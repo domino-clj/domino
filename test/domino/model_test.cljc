@@ -47,7 +47,7 @@
                            :outputs [:full-name]
                            :handler (fn [_ [fname lname] _]
                                       [(or (when (and fname lname) (str lname ", " fname)) fname lname)])}]
-        connected-events (connect model-paths events)]
+        connected-events (connect-events model-paths events)]
     (is (= {:inputs  [[:user :first-name] [:user :last-name]]
             :outputs [[:user :full-name]]}
            (dissoc (first connected-events) :handler)))

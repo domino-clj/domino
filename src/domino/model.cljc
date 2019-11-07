@@ -39,19 +39,60 @@
         id
         (recur (butlast path-segment))))))
 
-;;TODO path segment options can contain :pre and :post keys
-;;attach these to the handler map, and check them when running the handler
-
-(defn wrap [handler interceptors]
-  (let [[interceptor & interceptors] (reverse interceptors)]
+(defn wrap-pre [handler pre]
+  (let [[interceptor & pre] (reverse pre)]
     (reduce
       (fn [handler interceptor]
         (interceptor handler))
       (interceptor handler)
-      interceptors)))
+      pre)))
+
+(defn wrap-post [post]
+  (reduce
+    (fn [handler interceptor]
+      (interceptor handler))
+    identity
+    (reverse post)))
+
+(defn wrap [handler pre post]
+  (cond
+    (and (empty? pre) (empty? post))
+    handler
+
+    (empty? post)
+    (wrap-pre handler pre)
+
+    (empty? pre)
+    (let [post (wrap-post post)]
+      (fn [ctx inputs outputs]
+        (post (handler ctx inputs outputs))))
+
+    :else
+    (let [handler (wrap-pre handler pre)
+          post (wrap-post post)]
+      (fn [ctx inputs outputs]
+        (post (handler ctx inputs outputs))))))
+
+(defn ids-to-interceptors [id->opts ids k]
+  (->> ids
+       (mapcat #(get-in id->opts [% k]))
+       (remove nil?)
+       (not-empty)))
 
 ;;TODO ensure all keys are unique!
-(defn connect [{:keys [id->path]} events]
+(defn connect-events [{:keys [id->path id->opts]} events]
+  (let [path-for-id (fn [id] (get id->path id))]
+    (mapv
+      (fn [{:keys [inputs] :as event}]
+        (let [pre  (ids-to-interceptors id->opts inputs :pre)
+              post (ids-to-interceptors id->opts inputs :post)]
+          (-> event
+              (update :inputs #(map path-for-id %))
+              (update :outputs #(map path-for-id %))
+              (update :handler wrap pre post))))
+      events)))
+
+(defn connect-effects [{:keys [id->path]} events]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv
       (fn [event]
