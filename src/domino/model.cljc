@@ -1,6 +1,6 @@
 (ns domino.model
   (:require
-    [clojure.set :refer [map-invert]]))
+    [domino.util :as util]))
 
 (defn normalize [path-segment]
   (if (map? (second path-segment))
@@ -69,24 +69,28 @@
 
     :else
     (let [handler (wrap-pre handler pre)
-          post (wrap-post post)]
+          post    (wrap-post post)]
       (fn [ctx inputs outputs]
         (post (handler ctx inputs outputs))))))
 
-;;todo ensure that :pre/:post from all the parent path segments are included as well
-(defn ids-to-interceptors [id->opts ids k]
-  (->> ids
-       (mapcat #(get-in id->opts [% k]))
+(defn ids-to-interceptors
+  "finds the interceptors based on the provided ids
+  the lookup will consider parent path segments"
+  [path->id id->path id->opts ids k]
+  (->> (map id->path ids)
+       (mapcat util/generate-sub-paths)
+       (mapcat #(get-in id->opts [(path->id %) k]))
+       (distinct)
        (remove nil?)
        (not-empty)))
 
 ;;TODO ensure all keys are unique!
-(defn connect-events [{:keys [id->path id->opts]} events]
+(defn connect-events [{:keys [path->id id->path id->opts]} events]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv
       (fn [{:keys [inputs] :as event}]
-        (let [pre  (ids-to-interceptors id->opts inputs :pre)
-              post (ids-to-interceptors id->opts inputs :post)]
+        (let [pre  (ids-to-interceptors path->id id->path id->opts inputs :pre)
+              post (ids-to-interceptors path->id id->path id->opts inputs :post)]
           (-> event
               (update :inputs #(map path-for-id %))
               (update :outputs #(map path-for-id %))

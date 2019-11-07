@@ -116,7 +116,7 @@
                                                        ;; returning nil prevents handler execution
                                                        ))]}
                                        [:bar {:id :bar}]]
-                                      [:baz {:id   :baz}]
+                                      [:baz {:id :baz}]
                                       [:buz {:id :buz}]]
                             :events  [{:inputs  [:foo :baz]
                                        :outputs [:buz]
@@ -127,3 +127,23 @@
                                                   (reset! result buz))}]})]
     (is (= {:baz 1} (:domino.core/db (transact ctx [[[:baz] 1]]))))
     (is (nil? @result))))
+
+(deftest interceptor-on-parent
+  (let [result (atom nil)
+        ctx    (initialize {:model   [[:foo {:id  :foo
+                                             :pre [(fn [handler]
+                                                     (fn [ctx inputs outputs]
+                                                       (handler ctx
+                                                                (assoc inputs :bar 5)
+                                                                outputs)))]}
+                                       [:bar {:id :bar}]]
+                                      [:baz {:id   :baz}]
+                                      [:buz {:id :buz}]]
+                            :events  [{:inputs  [:bar :baz]
+                                       :outputs [:buz]
+                                       :handler (fn [ctx {:keys [bar baz]} _]
+                                                  {:buz (+ bar baz)})}]
+                            :effects [{:inputs  [:buz]
+                                       :handler (fn [ctx {:keys [buz]}]
+                                                  (reset! result buz))}]})]
+    (is (= {:baz 1 :buz 6} (:domino.core/db (transact ctx [[[:baz] 1]]))))))
