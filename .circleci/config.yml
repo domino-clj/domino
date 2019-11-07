@@ -2,7 +2,7 @@ version: 2
 
 jobs:
   deploy-docs:
-    docker: 
+    docker:
       - image: circleci/node:latest
     steps:
       - checkout
@@ -12,7 +12,7 @@ jobs:
             cd docs
             npm install
             npx lumo compile.cljs
-      - run: 
+      - run:
           name: clone GH pages repo
           command: git clone https://${GH_TOKEN}@github.com/domino-clj/domino-clj.github.io.git
       - run:
@@ -35,4 +35,8 @@ workflows:
   version: 2
   deploy:
     jobs:
-      - deploy-docs
+      - deploy-docs:
+          filters:
+            branches:
+              only:
+                - master
