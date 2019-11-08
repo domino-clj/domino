@@ -175,7 +175,7 @@ For example, this might happen when a button is clicked and you want a value to 
 (domino.core/trigger-events ctx [:increment-total])
 ```
 
-This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with Reagent [here](https://domino-clj.github.io/demo).
+This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with re-frame [here](https://domino-clj.github.io/demo).
 
 ## Possible Use Cases
 
