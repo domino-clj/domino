@@ -183,10 +183,9 @@ This wraps up everything you need to know to start using Domino. You can see a m
 - FSM
 - Reactive systems / spreadsheet-like models
 
-## Example App
+## Examples
 
-There is a demo front-end test page under `env/dev/cljs/domino/test_page.cljs`
-
+Example applications using Domino can be found [here](https://github.com/domino-clj/examples/).
 ## Inspirations
 
 - [re-frame](https://github.com/Day8/re-frame)
