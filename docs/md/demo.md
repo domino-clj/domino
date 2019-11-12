@@ -49,12 +49,15 @@
      :on-change #(rf/dispatch [:event id (-> % .-target .-value)])}]])
 
 (defn numeric-input [label id]
-  [:div
-   [:label label]
-   [:input 
-    {:type      :text
-     :value @(rf/subscribe [:id id])
-     :on-change #(rf/dispatch [:event id (-> % .-target .-value parse-float)])}]])
+  (reagent/with-let [value (reagent/atom nil)]
+   [:div
+     [:label label]
+     [:input 
+      {:type  :text
+       :value @value
+       :on-focus #(reset! value @(rf/subscribe [:id id]))
+       :on-blur #(rf/dispatch [:event id (parse-float @value)])
+       :on-change #(reset! value (-> % .-target .-value))}]]))
 
 (rf/dispatch-sync
    [:init
