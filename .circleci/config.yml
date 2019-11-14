@@ -33,11 +33,36 @@ jobs:
               echo "No changes to docs/ folder or README.md, ending build"
             fi
 
+  test:
+    docker:
+      - image: circleci/clojure:lein-2.9.1-node
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - deps-{{ checksum "project.clj"}}
+      - save_cache:
+          paths:
+            - ~/.m2
+          key: deps-{{ checksum "project.clj"}}
+      - run:
+          name: test clj
+          command: lein test2junit
+      - run:
+          name: test cljs
+          command: lein with-profile test doo node once
+      - store_test_results:
+          path: "target/test2junit"
+
+
 workflows:
   version: 2
-  deploy:
+  test-deploy:
     jobs:
+      - test
       - deploy-docs:
+          requires:
+            - test
           filters:
             branches:
               only:

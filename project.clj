@@ -1,8 +1,9 @@
 (defproject domino/core "0.2.0"
-            :description "Clojure(script) data flow engine"
-            :url "https://github.com/domino-clj/domino"
-            :license {:name "Eclipse Public License"
-                      :url "http://www.eclipse.org/legal/epl-v10.html"}
+  :description "Clojure(script) data flow engine"
+  :url "https://github.com/domino-clj/domino"
+  :license {:name "Eclipse Public License"
+            :url  "http://www.eclipse.org/legal/epl-v10.html"}
+            
   :dependencies
   [[org.clojure/clojure "1.10.1" :scope "provided"]
    [org.clojure/clojurescript "1.10.520" :scope "provided"]]
@@ -12,7 +13,10 @@
    [lein-figwheel "0.5.19"]
    [cider/cider-nrepl "0.21.1"]
    [lein-doo "0.1.10"]
-   [com.jakemccrary/lein-test-refresh "0.24.1"]]
+   [com.jakemccrary/lein-test-refresh "0.24.1"]
+   [test2junit "1.4.2"]]
+
+  :test2junit-output-dir "target/test2junit"
 
   :clojurescript? true
   :jar-exclusions [#"\.swp|\.swo|\.DS_Store"]
@@ -83,6 +87,7 @@
                       :source-map    true
                       :pretty-print  true}}}}
     :doo {:build "test"}}}
+    
     :aliases
     {#_#_"test"
      ["do"
