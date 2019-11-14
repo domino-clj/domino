@@ -9,3 +9,5 @@ figwheel_server.log
 pom.xml
 node_modules/
 docs/out/*.html
+/out
+pom.xml.asc

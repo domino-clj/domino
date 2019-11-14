@@ -1,6 +1,6 @@
 (ns domino.runner
   (:require
-    [doo.runner :refer-macros [doo-tests]]
+    [doo.runner :refer-macros [doo-all-tests]]
     [domino.core-test]))
 
-(doo-tests 'domino.core-test)
+(doo-all-tests)
