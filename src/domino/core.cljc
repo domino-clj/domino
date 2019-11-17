@@ -3,7 +3,8 @@
     [domino.effects :as effects]
     [domino.graph :as graph]
     [domino.model :as model]
-    [domino.validation :as validation]))
+    [domino.validation :as validation]
+    [domino.util :as util]))
 
 (defn initialize
   "Takes a schema of :model, :events, and :effects
@@ -29,14 +30,9 @@
          events (model/connect-events model events)]
      {::model        model
       ::events       events
-      ::events-by-id (reduce
-                       (fn [events-by-id event]
-                         (if-let [id (:id event)]
-                           (assoc events-by-id id event)
-                           events-by-id))
-                       {}
-                       events)
+      ::events-by-id (util/map-by-id events)
       ::effects      (effects/effects-by-paths (model/connect-effects model effects))
+      ::effects-by-id (util/map-by-id effects)
       ::db           initial-db
       ::graph        (graph/gen-ev-graph events)})))
 
@@ -55,3 +51,10 @@
   Accepts the context, and a collection of event ids"
   [ctx event-ids]
   (transact ctx (graph/events-inputs-as-changes ctx event-ids)))
+
+(defn trigger-effects
+  "Triggers effects by ids as opposed to data changes
+
+  Accepts the context, and a collection of effect ids"
+  [ctx effect-ids]
+  (transact ctx (graph/effect-outputs-as-changes ctx effect-ids)))

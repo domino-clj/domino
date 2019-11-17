@@ -237,3 +237,20 @@
                      inputs))))
     []
     event-ids))
+
+(defn try-effect [{:keys [handler] :as effect} ctx db old-outputs]
+  (try
+    (handler ctx old-outputs)
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info "failed to execute effect" {:effect effect :context ctx :db db} e)))))
+
+(defn effect-outputs-as-changes [{:domino.core/keys [effects-by-id db model] :as ctx} effect-ids]
+  (let [id->effect  #(get-in effects-by-id [%])
+        res->change (juxt (comp vector first) second)
+        old-outputs #(get-db-paths model db (map vector (:outputs %)))
+        run-effect  #(try-effect % ctx db (old-outputs %))]
+    (->> effect-ids
+         (map id->effect)
+         (map run-effect)
+         (mapcat identity)
+         (map res->change))))              

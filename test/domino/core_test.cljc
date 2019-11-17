@@ -82,16 +82,15 @@
                         {:n 10 :m 0})]
     (is (= {:n 10 :m 10} (:domino.core/db (core/trigger-events ctx [:match-n]))))))
 
-(deftest trigger-events-without-input
+(deftest trigger-effects-without-input
   (let [ctx (core/initialize {:model  [[:n {:id :n}]
                                        [:m {:id :m}]]
-                              :events [{:id      :match-n
-                                        :inputs  []
-                                        :outputs [:m :n]
-                                        :handler (fn [_ _ {:keys [n]}]
-                                                   {:m n})}]}
+                              :effects [{:id      :match-n
+                                         :outputs [:m :n]
+                                         :handler (fn [_ {:keys [n]}]
+                                                    {:m n})}]}
                              {:n 10 :m 0})]
-    (is (= {:n 10 :m 10} (:domino.core/db (core/trigger-events ctx [:match-n]))))))
+    (is (= {:n 10 :m 10} (:domino.core/db (core/trigger-effects ctx [:match-n]))))))
 
 (deftest pre-post-interceptors
   (let [result (atom nil)
