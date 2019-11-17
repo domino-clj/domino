@@ -37,6 +37,19 @@ The handler accepts three arguments: a context containing the current state of t
             {:total (+ total amount)})}
 ```
 
+It's also possible to declare async events by providing the `:async?` key, e.g:
+
+```clojure
+{:async? true
+ :inputs  [:amount]
+ :outputs [:total]
+ :handler (fn [ctx {:keys [amount]} {:keys [total]} callback]
+            (callback {:total (+ total amount)}))}
+```
+
+Async event handler takes an additional argument that specifies the callback function
+that should be called with the result.
+
 **3. Effects**
 
 Effects are executed after events have been transacted and the new context is produced. Effects are defined as a map of `:inputs` and a `:handler` function. 
