@@ -141,14 +141,33 @@
      [queue writer]
      (.write writer (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
-(defn try-event [{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs]
-  (try
-    (or
-      (handler ctx (get-db-paths model db inputs) old-outputs)
-      old-outputs)
-    (catch #?(:clj Exception :cljs js/Error) e
-      (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
+(defn try-event
+  ([event ctx db old-outputs] (try-event event ctx db old-outputs nil))
+  ([{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs cb]
+   (try
+     (if cb
+       (handler ctx (get-db-paths model db inputs) old-outputs
+                (fn [result] (cb (or result old-outputs))))
+       (or
+         (handler ctx (get-db-paths model db inputs) old-outputs)
+         old-outputs))
+     (catch #?(:clj Exception :cljs js/Error) e
+       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e))))))
 
+(defn update-ctx [ctx model old-outputs new-outputs]
+  (reduce-kv
+    (fn [ctx id new-value]
+      ;;todo validate that the id matches an ide declared in outputs
+      (if (not= (get old-outputs id) new-value)
+        (let [path (get-in model [:id->path id])]
+          (-> ctx
+              (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+                      (generate-sub-paths path))
+              (update ::db assoc-in path new-value)
+              (update ::changes conj [path new-value])))
+        ctx))
+    ctx
+    new-outputs))
 (defn ctx-updater
   "Reducer that updates context with new values updated in ctx from
   handler of each edge. New values are only stored when they are different
@@ -160,25 +179,16 @@
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
   [edges {::keys [db executed-events] :domino.core/keys [model] :as ctx}]
   (reduce
-    (fn [ctx {{:keys [outputs] :as event} :edge}]
+    (fn [ctx {{:keys [async? outputs] :as event} :edge}]
       (if (contains? executed-events event)
         ctx
         (let [ctx         (update ctx ::executed-events conj event)
-              old-outputs (get-db-paths (:domino.core/model ctx) db outputs)
-              new-outputs (try-event event ctx db old-outputs)]
-          (reduce-kv
-            (fn [ctx id new-value]
-              ;;todo validate that the id matches an ide declared in outputs
-              (if (not= (get old-outputs id) new-value)
-                (let [path (get-in model [:id->path id])]
-                  (-> ctx
-                      (update ::changed-paths (fnil (partial reduce conj) empty-queue)
-                              (generate-sub-paths path))
-                      (update ::db assoc-in path new-value)
-                      (update ::changes conj [path new-value])))
-                ctx))
-            ctx
-            new-outputs))))
+              old-outputs (get-db-paths (:domino.core/model ctx) db outputs)]
+          (if async?
+            (try-event event ctx db old-outputs
+                       (fn [new-outputs]
+                         (update-ctx ctx model old-outputs new-outputs)))
+            (update-ctx ctx model old-outputs (try-event event ctx db old-outputs))))))
     ctx
     edges))
 

@@ -1,9 +1,8 @@
-(defproject domino/core "0.2.0"
-  :description "Clojure(script) data flow engine"
-  :url "https://github.com/domino-clj/domino"
-  :license {:name "Eclipse Public License"
-            :url  "http://www.eclipse.org/legal/epl-v10.html"}
-            
+(defproject domino/core "0.2.1"
+            :description "Clojure(script) data flow engine"
+            :url "https://github.com/domino-clj/domino"
+            :license {:name "Eclipse Public License"
+                      :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies
   [[org.clojure/clojure "1.10.1" :scope "provided"]
    [org.clojure/clojurescript "1.10.520" :scope "provided"]]

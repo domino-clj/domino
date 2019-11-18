@@ -1,3 +1,7 @@
+### 0.2.1
+
+- async event support
+
 ### 0.2.0
 
 - **[BREAKING]** renamed `initialize!` to `initialize` since it's a pure function
