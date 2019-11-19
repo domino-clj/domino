@@ -2,6 +2,11 @@
 
 [![Clojars Project](https://img.shields.io/clojars/v/domino/core.svg)](https://clojars.org/domino/core)
 
+[](https://circleci.com/gh/domino-clj/domino)
+
+
+[![CircleCI](https://circleci.com/gh/domino-clj/domino.svg?style=svg)](https://circleci.com/gh/domino-clj/domino)
+
 <h3 class="hidden">See <a href="https://domino-clj.github.io">here</a> for interactive documentation.</h3>
 
 Domino is a data flow engine that helps you organize the interactions between your data model and events. Domino allows you to declare your business logic using a directed acyclic graph of events and effects. Whenever an external change is transacted to the data model, the graph determines the chain of events that will be executed, and side effects triggered as a result of the computation.
