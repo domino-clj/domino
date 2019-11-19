@@ -3,6 +3,10 @@
             #?(:clj  [clojure.test :refer :all]
                :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 
+(defn ->hex [s]
+  #?(:clj  (format "%02x" (int s))
+     :cljs (.toString (.charCodeAt s 0) 16)))
+
 (deftest duplicate-id-keys-present
   (is (= [["duplicate id :fname in the model" {:id :fname}]]
          (:errors (validation/check-valid-model {:model    [[:user {:id :user}
@@ -58,5 +62,5 @@
                                                                :handler (fn [_ [{:keys [first-name last-name full-name]
                                                                                  :or   {first-name "" last-name "" full-name ""}}] _]
                                                                           [(->> (str first-name last-name full-name)
-                                                                                (map #(format "%02x" (int %)))
+                                                                                (map ->hex)
                                                                                 (apply str))])}]})))))
