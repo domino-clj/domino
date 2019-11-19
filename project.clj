@@ -12,7 +12,10 @@
    [lein-figwheel "0.5.19"]
    [cider/cider-nrepl "0.21.1"]
    [lein-doo "0.1.10"]
-   [com.jakemccrary/lein-test-refresh "0.24.1"]]
+   [com.jakemccrary/lein-test-refresh "0.24.1"]
+   [test2junit "1.4.2"]]
+
+  :test2junit-output-dir "target/test2junit"
 
   :clojurescript? true
   :jar-exclusions [#"\.swp|\.swo|\.DS_Store"]
