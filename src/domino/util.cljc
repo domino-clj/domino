@@ -8,3 +8,9 @@
     (if (not-empty path)
       (recur (conj paths (vec path)) (drop-last path))
       paths)))
+
+(defn map-by-id [items]
+  (->> items
+       (filter #(contains? % :id))
+       (map (juxt :id identity))    
+       (into {})))
