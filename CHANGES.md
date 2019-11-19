@@ -1,6 +1,7 @@
 ### 0.2.1
 
 - async event support
+- `trigger-effects` fn added to `domino.core` allowing triggering of effects via ids
 
 ### 0.2.0
 
@@ -11,6 +12,6 @@
   matching the keys specified in the `:outputs`
 - updated the model parser to handle segments without an options map
 - introduces `:pre` and `:post` conditions
-- `trigger-events` fn added to domino.core, allowing triggering events via ids
+- `trigger-events` fn added to `domino.core`, allowing triggering events via ids
 - add schema definition validation
 - validate for duplicate ids in model

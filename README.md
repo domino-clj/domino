@@ -52,9 +52,39 @@ that should be called with the result.
 
 **3. Effects**
 
-Effects are executed after events have been transacted and the new context is produced. Effects are defined as a map of `:inputs` and a `:handler` function. 
+Effects are used for effectful operations, such as IO, that happen at the edges of
+the computation. The effects do not cascade. An effect can contain the following keys: 
 
-The handler accepts two arguments: a context containing the current state of the engine, and a list of input values. The effects do not cascade. For example:
+* `:id` - optional unique identifier for the event
+* `:inputs` - optional set of inputs that trigger the event to run when changed
+* `:outputs` - optional set of outpus that the event will produce when running the handler
+* `:handler` - a function that handles the business logic for the effect
+
+#### incoming effects
+
+Effects that declare `:outputs` are used to generate the initial input to the
+engine. For example, an effect that injects a timestamp can look as follows:
+
+```clojure
+{:id      :timestamp
+ :outputs [:ts]
+ :handler (fn [_ {:keys [ts]}]
+            {:ts (.getTime (java.util.Date.))})}
+```
+
+The effect has an `:id` key specifying the unique identifier that is used be trigger the event
+by calling the `domino.core/trigger-effects` function. This function accepts a collection of
+event ids, e.g: `(trigger-effects ctx [:timestamp])`.
+
+The handler accepts two arguments: a context containing the current state of the engine, and a list of output values.
+
+#### outgoing effects
+
+Effects that declare `:inputs` will be run after events have been transacted and the new context is produced. These effects are defined as a map of `:inputs` and a `:handler` function. 
+
+The handler accepts two arguments: a context containing the current state of the engine, and a list of input values.
+
+ For example:
 
 ```clojure
 {:inputs [:total]
