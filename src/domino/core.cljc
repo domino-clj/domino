@@ -1,6 +1,7 @@
 (ns domino.core
   (:require
     [domino.effects :as effects]
+    [domino.events :as events]
     [domino.graph :as graph]
     [domino.model :as model]
     [domino.validation :as validation]
@@ -11,7 +12,7 @@
 
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
   [ctx changes]
-  (let [updated-ctx (graph/execute-events ctx changes)]
+  (let [updated-ctx (events/execute-events ctx changes)]
     (effects/execute-effects! updated-ctx)
     updated-ctx))
 
@@ -66,11 +67,11 @@
 
   Accepts the context, and a collection of event ids"
   [ctx event-ids]
-  (transact ctx (graph/events-inputs-as-changes ctx event-ids)))
+  (transact ctx (events/events-inputs-as-changes ctx event-ids)))
 
 (defn trigger-effects
   "Triggers effects by ids as opposed to data changes
 
   Accepts the context, and a collection of effect ids"
   [ctx effect-ids]
-  (transact ctx (graph/effect-outputs-as-changes ctx effect-ids)))
+  (transact ctx (effects/effect-outputs-as-changes ctx effect-ids)))
