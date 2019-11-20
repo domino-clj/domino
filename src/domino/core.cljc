@@ -15,7 +15,9 @@
     (effects/execute-effects! updated-ctx)
     updated-ctx))
 
-(defn initial-transaction [{::keys [model] :as ctx} initial-db]
+(defn initial-transaction
+  "If initial-db is not empty, transact with initial db as changes"
+  [{::keys [model] :as ctx} initial-db]
   (if (empty? initial-db)
     ctx
     (transact ctx
