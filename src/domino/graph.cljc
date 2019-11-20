@@ -256,8 +256,9 @@
 
 (defn effect-outputs-as-changes [{:domino.core/keys [effects-by-id db model] :as ctx} effect-ids]
   (let [id->effect  #(get-in effects-by-id [%])
-        res->change (juxt (comp vector first) second)
-        old-outputs #(get-db-paths model db (map vector (:outputs %)))
+        id->path    #(get-in model [:id->path %])
+        res->change (juxt (comp id->path first) second)
+        old-outputs #(get-db-paths model db (map id->path (:outputs %)))
         run-effect  #(try-effect % ctx db (old-outputs %))]
     (->> effect-ids
          (map id->effect)
