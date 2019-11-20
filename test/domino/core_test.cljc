@@ -71,6 +71,22 @@
     (is (= {:baz 1, :foo {:bar 2}, :buz 3} (:domino.core/db (core/transact ctx [[[:baz] 1]]))))
     (is (= {:bar 2} @result))))
 
+(deftest run-events-on-init
+  (let [ctx    (core/initialize {:model   [[:foo {:id :foo}
+                                            [:bar {:id :bar}]]
+                                           [:baz {:id :baz}]
+                                           [:buz {:id :buz}]]
+                                 :events  [{:inputs  [:baz]
+                                            :outputs [:bar]
+                                            :handler (fn [ctx {:keys [baz]} _]
+                                                       {:bar (inc baz)})}
+                                           {:inputs  [:foo]
+                                            :outputs [:buz]
+                                            :handler (fn [ctx {:keys [foo]} _]
+                                                       {:buz (inc (:bar foo))})}]}
+                                {:baz 1})]
+    (is (= {:foo {:bar 2} :baz 1 :buz 3} (:domino.core/db ctx)))))
+
 (deftest trigger-events-test
   (let [ctx (core/initialize {:model  [[:n {:id :n}]
                                          [:m {:id :m}]]

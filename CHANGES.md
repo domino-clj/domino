@@ -1,3 +1,8 @@
+### 0.2.2
+
+- run events on initialize when initial-db is provided
+- fix: trigger effect with nested model
+
 ### 0.2.1
 
 - async event support
