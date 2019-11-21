@@ -62,13 +62,6 @@
         ::graph         (graph/gen-ev-graph events)}
        initial-db))))
 
-(defn trigger-events
-  "Triggers events by ids as opposed to data changes
-
-  Accepts the context, and a collection of event ids"
-  [ctx event-ids]
-  (transact ctx (events/events-inputs-as-changes ctx event-ids)))
-
 (defn trigger-effects
   "Triggers effects by ids as opposed to data changes
 
