@@ -227,7 +227,7 @@ Effects can act as inputs to the data flow engine. For example, this might happe
 (:domino.core/db (domino.core/trigger-effects ctx [:increment-total])) ;; => {:total 1}
 ```
 
-This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with Reagent [here](https://domino-clj.github.io/demo).
+This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with re-frame [here](https://domino-clj.github.io/demo).
 
 ## Possible Use Cases
 
