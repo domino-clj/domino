@@ -13,30 +13,35 @@
 ```
 
 ```clojure lang-eval-clojure
+;;initialize the Domino context using the supplied schema
 (rf/reg-event-db
  :init
  (fn [_ [_ schema]]
    (domino/initialize schema)))
 
+;;trigger effects with the provided ids
 (rf/reg-event-db
   :trigger-effects
-  (fn [db [_ effect-ids]]
-    (domino/trigger-effects db effect-ids)))
+  (fn [ctx [_ effect-ids]]
+    (domino/trigger-effects ctx effect-ids)))
 
+;;dispatch an input event
 (rf/reg-event-db
  :event
- (fn [db [_ id value]]
-   (domino/transact db [[(get-in (::domino/model db) [:id->path id]) value]])))
+ (fn [ctx [_ id value]]
+   (domino/transact ctx [[(get-in (::domino/model ctx) [:id->path id]) value]])))
 
+;;subscribe to the value at the given id
 (rf/reg-sub
  :id
- (fn [db [_ id]]
-   (get-in (::domino/db db) (get-in (::domino/model db) [:id->path id]))))
+ (fn [ctx [_ id]]
+   (get-in (::domino/db ctx) (get-in (::domino/model ctx) [:id->path id]))))
 
+;;returns Domino db
 (rf/reg-sub
  :db
- (fn [db _]
-   (::domino/db db)))
+ (fn [ctx _]
+   (::domino/db ctx)))
 
 (defn parse-float [s]
   (let [value (js/parseFloat s)]
@@ -64,6 +69,7 @@
        :on-blur #(rf/dispatch [:event id (parse-float @value)])
        :on-change #(reset! value (-> % .-target .-value))}]]))
 
+;;initialize Domino
 (rf/dispatch-sync
    [:init
     {:model
@@ -100,6 +106,7 @@
                           (/ weight (* height height))
                           bmi)})}]}])
 
+;;render the UI
 (defn home-page []
   [:div
    [:h3 "Patient demographics"]
