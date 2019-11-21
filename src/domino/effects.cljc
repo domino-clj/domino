@@ -48,6 +48,7 @@
         old-outputs #(events/get-db-paths model db (map id->path (:outputs %)))
         run-effect  #(try-effect % ctx db (old-outputs %))]
     (->> effect-ids
+         ;; TODO: transduce
          (map id->effect)
          (map run-effect)
          (mapcat identity)
