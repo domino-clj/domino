@@ -209,16 +209,22 @@ With interceptors, you can also short circuit an event, wherein you prevent hand
                      ))]}]]}
 ```
 
-### Triggering Events
+### Triggering Effects
 
-Occasionally, there may be a use case where you would want to trigger an event directly without transacting updated state. Events, optionally, can have an id key associated with them. This is how you would be able to reference the event from trigger-events. 
+Effects can act as inputs to the data flow engine. For example, this might happen when a button is clicked and you want a value to increment. This can be accomplished with a call to `trigger-effects`.
 
-For example, this might happen when a button is clicked and you want a value to increment. This can be accomplished with a call to `trigger-events`.
-
-`trigger-events` takes a list of events that you would like trigger and calls `transact` with the current state of the data from all the inputs of the events. For example:
+`trigger-effects` takes a list of effects that you would like trigger and calls `transact` with the current state of the data from all the inputs of the effects. For example:
 
 ```clojure
-(domino.core/trigger-events ctx [:increment-total])
+(def ctx
+     (domino.core/initialize
+       {:model   [[:total {:id :total}]]
+        :effects [{:id      :increment-total
+                   :outputs [:total]
+                   :handler (fn [_ current-state]
+                              (update current-state :total inc))}]}))
+
+(:domino.core/db (domino.core/trigger-effects ctx [:increment-total])) ;; => {:total 1}
 ```
 
 This wraps up everything you need to know to start using Domino. You can see a more detailed example using Domino with Reagent [here](https://domino-clj.github.io/demo).

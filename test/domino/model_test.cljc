@@ -2,6 +2,7 @@
   (:require
     [domino.core :as core]
     [domino.graph :as graph]
+    [domino.events :as events]
     [domino.model :as model]
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
@@ -55,7 +56,7 @@
           {::core/db {:user {:first-name "Bob"}}
            :change-history  [[[:user :first-name] "Bob"]]}
           (select-keys
-            (graph/execute-events {::core/db    {}
+            (events/execute-events {::core/db    {}
                                    ::core/graph (graph/gen-ev-graph events)}
                                   [[(id->path :fname) "Bob"]])
             [::core/db :change-history])))
@@ -64,7 +65,7 @@
                              :last-name  "Bobberton"}}
            :change-history  [[[:user :first-name] "Bob"] [[:user :last-name] "Bobberton"]]}
           (select-keys
-            (graph/execute-events {::core/db    {}
+            (events/execute-events {::core/db    {}
                                    ::core/graph (graph/gen-ev-graph events)}
                                   [[(id->path :fname) "Bob"]
                                    [(id->path :lname) "Bobberton"]])

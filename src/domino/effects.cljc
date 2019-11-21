@@ -1,6 +1,6 @@
 (ns domino.effects
   (:require
-    [domino.graph :as graph]
+    [domino.events :as events]
     [domino.util :refer [generate-sub-paths]]))
 
 (defn effects-by-paths [effects]
@@ -19,7 +19,7 @@
           changes))
 
 (defn execute-effect! [{:domino.core/keys [model db] :as ctx} {:keys [inputs handler]}]
-  (handler ctx (graph/get-db-paths model db inputs)))
+  (handler ctx (events/get-db-paths model db inputs)))
 
 (defn execute-effects!
   [{:keys [change-history] :domino.core/keys [effects] :as ctx}]
@@ -34,3 +34,22 @@
          (mapcat generate-sub-paths)
          distinct
          (change-effects effects))))                        ;; TODO: double check this approach when changes is a sequential history
+
+(defn try-effect [{:keys [handler] :as effect} ctx db old-outputs]
+  (try
+    (handler ctx old-outputs)
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info "failed to execute effect" {:effect effect :context ctx :db db} e)))))
+
+(defn effect-outputs-as-changes [{:domino.core/keys [effects-by-id db model] :as ctx} effect-ids]
+  (let [id->effect  #(get-in effects-by-id [%])
+        id->path    #(get-in model [:id->path %])
+        res->change (juxt (comp id->path first) second)
+        old-outputs #(events/get-db-paths model db (map id->path (:outputs %)))
+        run-effect  #(try-effect % ctx db (old-outputs %))]
+    (->> effect-ids
+         ;; TODO: transduce
+         (map id->effect)
+         (map run-effect)
+         (mapcat identity)
+         (map res->change))))

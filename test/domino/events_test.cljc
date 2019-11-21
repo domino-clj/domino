@@ -1,8 +1,9 @@
-(ns domino.graph-test
+(ns domino.events-test
   (:require
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
     [domino.graph :as graph]
+    [domino.events :as events]
     [domino.model :as model]
     [domino.core :as core]))
 
@@ -33,7 +34,7 @@
               {::core/model test-model
                ::core/db    db
                ::core/graph (graph/gen-ev-graph events)})
-            (graph/execute-events inputs)
+            (events/execute-events inputs)
             (select-keys [::core/db :change-history]))))))
 
 (deftest no-events
@@ -83,7 +84,7 @@
   (is
     (thrown?
       #?(:clj clojure.lang.ExceptionInfo :cljs js/Error)
-      (graph/execute-events
+      (events/execute-events
         {::core/db    default-db
          ::core/graph (graph/gen-ev-graph
                         [{:inputs  [[:a]]

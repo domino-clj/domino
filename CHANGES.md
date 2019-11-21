@@ -1,10 +1,13 @@
-### 0.2.1
+### 0.3.0
+- fix: trigger effect with nested model
+- `trigger-events` removed, `trigger-effects`  should be used instead
+- events will now be executed by the `initialize` function when initial state is provided
 
+### 0.2.1
 - async event support
 - `trigger-effects` fn added to `domino.core` allowing triggering of effects via ids
 
 ### 0.2.0
-
 - **[BREAKING]** renamed `initialize!` to `initialize` since it's a pure function
 - **[BREAKING]** inputs and outputs for events are now maps containing the keys
   specified in the `:inputs` and `:outputs` vectors
