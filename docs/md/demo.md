@@ -19,6 +19,11 @@
    (domino/initialize schema)))
 
 (rf/reg-event-db
+  :trigger-effects
+  (fn [db [_ effect-ids]]
+    (domino/trigger-effects db effect-ids)))
+
+(rf/reg-event-db
  :event
  (fn [db [_ id value]]
    (domino/transact db [[(get-in (::domino/model db) [:id->path id]) value]])))
@@ -69,9 +74,14 @@
       [:vitals
        [:height {:id :height}]
        [:weight {:id :weight}]
-       [:bmi {:id :bmi}]]]
+       [:bmi {:id :bmi}]]
+      [:counter {:id :counter}]]
      :effects
-     [{:inputs  [:full-name]
+     [{:id :increment
+       :outputs [:counter]
+       :handler (fn [_ state]
+                  (update state :counter (fnil inc 0)))}
+      {:inputs  [:full-name]
        :handler (fn [_ {:keys [full-name]}]
                   (when (= "Bobberton, Bob" full-name)
                     (js/alert "Hi Bob!")))}]
@@ -97,8 +107,12 @@
    [text-input "Last name" :last-name]
    [numeric-input "Height (M)" :height (fnil js/parseFloat 0)]
    [numeric-input "Weight (KG)" :weight (fnil js/parseFloat 0)]
+   [:button
+    {:on-click #(rf/dispatch [:trigger-effects [:increment]])}
+    "increment count"]
    [:p>label "Full name " @(rf/subscribe [:id :full-name])]
    [:p>label "BMI " (format-number @(rf/subscribe [:id :bmi]))]
+   [:p>label "Counter " @(rf/subscribe [:id :counter])]
    [:hr]
    [:h4 "DB state"]
    [:pre (with-out-str (pprint @(rf/subscribe [:db])))]])
