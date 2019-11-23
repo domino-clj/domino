@@ -4,7 +4,8 @@
   "dependencies": {
     "lumo-cljs": "1.10.1",
     "nunjucks": "3.1.7",
-    "markdown-clj": "1.10.1"
+    "markdown-clj": "1.10.1",
+    "fs-extra": "8.1.0"
   },
   "scripts": {
     "start": "./compile.cljs"

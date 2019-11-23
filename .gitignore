@@ -8,6 +8,7 @@ figwheel_server.log
 .lein-repl-history
 pom.xml
 node_modules/
-docs/out/*.html
-/out
+out/
+docs/out/
 pom.xml.asc
+build.xml

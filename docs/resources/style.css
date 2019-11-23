@@ -10,7 +10,6 @@ body {
 }
 
 h1, h2, h3, h4, h5, h6 {
-    color: #000;
     line-height: 1;
 }
 
@@ -19,32 +18,34 @@ h1 {
 }
 
 h2 {
-    font-size: 1.85em
+    font-size: 1.85em;
+    padding-bottom: 0.3em;
+    border-bottom: 1px solid #eaecef;
 }
 
 h3 {
-    font-size: 1.5em
+    font-size: 1.35em
 }
 
 h4 {
-    font-size: 1.375em
+    font-size: 1.2em
 }
 
 h5 {
-    font-size: 1.25em
+    font-size: 1.15em
 }
 
 h6 {
-    font-size: 1.125em
+    font-size: 1.1em
 }
 
 a {
     text-decoration: none;
-    color: #09f;
+    color: #4165a2;
 }
 
 a:hover {
-    text-decoration: underline;
+    border-bottom: 1px dotted black;
 }
 pre {
     font-size: 16px;

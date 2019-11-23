@@ -5,7 +5,7 @@
    [cljs.tools.reader.reader-types :refer [string-push-back-reader read-char]]
    [clojure.string :as string]
    [markdown.core :as markdown]
-   ["fs" :as fs]
+   ["fs-extra" :as fs]
    ["nunjucks" :as nj])
   (:import goog.string.StringBuffer))
 
@@ -35,8 +35,13 @@
 
 ;;================= MAIN ============================
 (let [readme (slurp (path ".." "README.md"))
-      docs (try (fs/readdirSync "md" #js{:encoding "UTF-8"}) (catch js/Error _))]
+      docs (try (fs/readdirSync "md" #js{:encoding "UTF-8"}) (catch js/Error _))
+      resources (try (fs/readdirSync "resources" #js{:encoding "UTF-8"}) (catch js/Error _))]
   
+  (fs/copySync (path ".." "logo") (path "out" "logo"))
+  (doseq [resource resources]
+    (fs/copySync (path "resources" resource) (path "out" resource)))
+
   (spit
    (path "out" "index.html")
    (nj/render

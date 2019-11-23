@@ -1,11 +1,8 @@
-<h1><a href="https://github.com/domino-clj/domino">Domino</a></h1>
 
-[![Clojars Project](https://img.shields.io/clojars/v/domino/core.svg)](https://clojars.org/domino/core)
+<h1><img src="logo/logo.png" title="" style="margin-bottom: -10px; margin-right: 10px;" width="85px"><a href="https://github.com/domino-clj/domino">Domino</a></h1>
 
-[](https://circleci.com/gh/domino-clj/domino)
+[![CircleCI](https://img.shields.io/circleci/build/gh/domino-clj/domino?label=CircleCI&logo=circleci&style=flat-square)](https://circleci.com/gh/domino-clj/domino) [![Clojars Project](https://img.shields.io/clojars/v/domino/core?&style=flat-square)](https://clojars.org/domino/core) [![Slack](https://img.shields.io/badge/slack-%40clojurians%2Fdomino--clj-blue?logo=slack&style=flat-square)](https://clojurians.slack.com/messages/domino-clj) [![Clojars Downloads](https://img.shields.io/clojars/dt/domino/core?color=blue&style=flat-square)](https://clojars.org/domino/core) [![GitHub Stars](https://img.shields.io/github/stars/domino-clj/domino?logo=github&style=flat-square)](https://github.com/domino-clj/domino/stargazers)
 
-
-[![CircleCI](https://circleci.com/gh/domino-clj/domino.svg?style=svg)](https://circleci.com/gh/domino-clj/domino)
 
 <h3 class="hidden">See <a href="https://domino-clj.github.io">here</a> for interactive documentation.</h3>
 
@@ -19,19 +16,19 @@ Domino explicitly separates logic that makes changes to the data model from side
 
 Domino consists of three main concepts:
 
-**1. Model**
+### 1. Model
 
-The model represents the paths within an EDN data structure. These paths will typically represent fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key. 
+The model represents the paths within an EDN data structure. These paths will typically represent fields within a document. Each path entry is a tuple where the first value is the path segment, and the second value is the metadata associated with it. If the path is to be used for effects and/or events, the metadata must contain the `:id` key.
 
-For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition: 
+For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key within the data model and can be referenced in your events and effects as `:amount` (defined by the `:id`). You can nest paths within each other, such as the following model definition:
 
 ```clojure
 [[:patient [:first-name {:id :fname}]]]
 ```
 
-**2. Events**
+### 2. Events
 
-The events define the business logic associated with the changes of the model. Whenever a value is transacted, associated events are computed. Events are defined by three keys; an `:inputs` vector, an `:outputs` vector, and a `:handler` function. 
+The events define the business logic associated with the changes of the model. Whenever a value is transacted, associated events are computed. Events are defined by three keys; an `:inputs` vector, an `:outputs` vector, and a `:handler` function.
 
 The handler accepts three arguments: a context containing the current state of the engine, a list of the input values, and a list of the output values. The function should produce a vector of outputs matching the declared `:outputs` key. For example:
 
@@ -45,7 +42,7 @@ The handler accepts three arguments: a context containing the current state of t
 It's also possible to declare async events by providing the `:async?` key, e.g:
 
 ```clojure
-{:async? true
+{:async?  true
  :inputs  [:amount]
  :outputs [:total]
  :handler (fn [ctx {:keys [amount]} {:keys [total]} callback]
@@ -55,17 +52,17 @@ It's also possible to declare async events by providing the `:async?` key, e.g:
 Async event handler takes an additional argument that specifies the callback function
 that should be called with the result.
 
-**3. Effects**
+### 3. Effects
 
 Effects are used for effectful operations, such as IO, that happen at the edges of
-the computation. The effects do not cascade. An effect can contain the following keys: 
+the computation. The effects do not cascade. An effect can contain the following keys:
 
 * `:id` - optional unique identifier for the event
 * `:inputs` - optional set of inputs that trigger the event to run when changed
 * `:outputs` - optional set of outpus that the event will produce when running the handler
 * `:handler` - a function that handles the business logic for the effect
 
-#### incoming effects
+#### Incoming Effects
 
 Effects that declare `:outputs` are used to generate the initial input to the
 engine. For example, an effect that injects a timestamp can look as follows:
@@ -83,9 +80,9 @@ event ids, e.g: `(trigger-effects ctx [:timestamp])`.
 
 The handler accepts two arguments: a context containing the current state of the engine, and a list of output values.
 
-#### outgoing effects
+#### Outgoing Effects
 
-Effects that declare `:inputs` will be run after events have been transacted and the new context is produced. These effects are defined as a map of `:inputs` and a `:handler` function. 
+Effects that declare `:inputs` will be run after events have been transacted and the new context is produced. These effects are defined as a map of `:inputs` and a `:handler` function.
 
 The handler accepts two arguments: a context containing the current state of the engine, and a list of input values.
 
@@ -114,7 +111,7 @@ Let's take a look at a simple engine that accumulates a total. Whenever an amoun
 (def schema
   {:model   [[:amount {:id :amount}]
              [:total {:id :total}]]
-   :events  [{:id      :update-total 
+   :events  [{:id      :update-total
               :inputs  [:amount]
               :outputs [:total]
               :handler (fn [ctx {:keys [amount]} {:keys [total]}]
@@ -131,7 +128,7 @@ This schema declaration is a map containing three keys:
 * The `:events` key contains pure functions that represent events that are triggered when their inputs change. The events produce updated values that are persisted in the state.
 * The `:effects` key contains the functions that produce side effects based on the updated state.
 
-Using a unified model referenced by the event functions allows us to easily tell how a particular piece of business logic is triggered. 
+Using a unified model referenced by the event functions allows us to easily tell how a particular piece of business logic is triggered.
 
 The event engine generates a direct acyclic graph (DAG) based on the `:input` keys declared by each event that's used to compute the new state in a transaction. This approach removes any ambiguity regarding when and how business logic is executed.
 
@@ -195,7 +192,7 @@ if the context is authorized before running the events as follows:
             {:model  [[:foo {:id   :foo
                              :pre  [(fn [handler]
                                       (fn [ctx inputs outputs]
-                                        ;;only run the handler if ctx contains
+                                        ;; only run the handler if ctx contains
                                         ;; :authorized key
                                         (when (:authorized ctx)
                                           (handler ctx inputs outputs))))]
@@ -226,7 +223,7 @@ Effects can act as inputs to the data flow engine. For example, this might happe
                     :handler (fn [_ current-state]
                                (update current-state :total inc))}]}
         {:total 0})]
-  
+
 (:domino.core/db (domino.core/trigger-effects ctx [:increment-total])))
 ```
 
@@ -250,7 +247,7 @@ This wraps up everything you need to know to start using Domino. You can see a m
 
 ## License
 
-Copyright © 2019 
+Copyright © 2019
 
 Distributed under the Eclipse Public License either version 1.0 or (at
 your option) any later version.
