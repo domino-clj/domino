@@ -11,8 +11,6 @@ jobs:
           command: |
             COMMIT_RANGE=$(echo $CIRCLE_COMPARE_URL | sed 's:^.*/compare/::g')
             echo "Commit range" $COMMIT_RANGE
-            echo "Changed files:"
-            git diff --name-only $COMMIT_RANGE
             echo
             if [[ $(git diff --name-only $COMMIT_RANGE | grep -E '^(README.md|docs/|\.circleci/config.yml)') != "" ]]
             then
