@@ -253,7 +253,7 @@ This wraps up everything you need to know to start using Domino. You can see a m
 
 ## Example App
 
-There is a demo front-end test page under `env/dev/cljs/domino/test_page.cljs`
+* demo applications can be found [here](https://github.com/domino-clj/examples)
 
 ## Inspirations
 
