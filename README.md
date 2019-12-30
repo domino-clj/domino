@@ -39,6 +39,19 @@ The handler accepts three arguments: a context containing the current state of t
             {:total (+ total amount)})}
 ```
 
+
+Domino also provides a `domino.core/event` helper for declaring events, so the above
+event can also be written as follows:
+
+```clojure
+(domino.core/event [ctx {:keys [amount]} {:keys [total]}]
+  {:total (+ total amount)})
+```
+
+The macro requires that the `:keys` destructuring syntax is used for input and outputs, and
+expands the the event map with the `:inputs` and `:outputs` keys being inferred from the
+ones specified using the `:keys` in the event declaration.
+
 It's also possible to declare async events by providing the `:async?` key, e.g:
 
 ```clojure
