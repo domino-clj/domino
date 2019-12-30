@@ -1,3 +1,7 @@
+### 0.3.1
+
+- added `domino.core/event` macro helper for declaring events
+
 ### 0.3.0
 - fix: trigger effect with nested model
 - `trigger-events` removed, `trigger-effects`  should be used instead

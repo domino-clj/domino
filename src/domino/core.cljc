@@ -7,6 +7,14 @@
     [domino.validation :as validation]
     [domino.util :as util]))
 
+#?(:clj
+   (defmacro event [[_ in out :as args] & body]
+     (let [in-ks#  (mapv keyword (:keys in))
+           out-ks# (mapv keyword (:keys out))]
+       {:inputs  in-ks#
+        :outputs out-ks#
+        :handler `(fn ~(vec args) ~@body)})))
+
 (defn transact
   "Take the context and the changes which are an ordered collection of changes
 
@@ -22,13 +30,13 @@
   (if (empty? initial-db)
     ctx
     (transact ctx
-             (reduce
-               (fn [inputs [_ path]]
-                 (if-some [v (get-in initial-db path)]
-                   (conj inputs [path v])
-                   inputs))
-               []
-               (:id->path model)))))
+              (reduce
+                (fn [inputs [_ path]]
+                  (if-some [v (get-in initial-db path)]
+                    (conj inputs [path v])
+                    inputs))
+                []
+                (:id->path model)))))
 
 (defn initialize
   "Takes a schema of :model, :events, and :effects
