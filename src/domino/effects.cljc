@@ -22,7 +22,7 @@
   (handler ctx (events/get-db-paths model db inputs)))
 
 (defn execute-effects!
-  [{:keys [change-history] :domino.core/keys [effects] :as ctx}]
+  [{:domino.core/keys [change-history effects] :as ctx}]
   (reduce
     (fn [visited effect]
       (if-not (contains? visited effect)

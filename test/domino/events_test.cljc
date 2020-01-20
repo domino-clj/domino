@@ -35,14 +35,14 @@
                ::core/db    db
                ::core/graph (graph/gen-ev-graph events)})
             (events/execute-events inputs)
-            (select-keys [::core/db :change-history]))))))
+            (select-keys [::core/db ::core/change-history]))))))
 
 (deftest no-events
   (test-graph-events
     []
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1)
-     :change-history [[[:a] 1]]}))
+     ::core/change-history [[[:a] 1]]}))
 
 (deftest nil-output-ignored
   (test-graph-events
@@ -51,7 +51,7 @@
       :handler (fn [_ _ _])}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1)
-     :change-history [[[:a] 1]]}))
+     ::core/change-history [[[:a] 1]]}))
 
 (deftest single-input-output
   (test-graph-events
@@ -60,7 +60,7 @@
       :handler (fn [ctx {:keys [a]} {:keys [b]}] {:b (+ a b)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1 :b 1)
-     :change-history [[[:a] 1] [[:b] 1]]}))
+     ::core/change-history [[[:a] 1] [[:b] 1]]}))
 
 (deftest unmatched-event
   (test-graph-events
@@ -69,7 +69,7 @@
       :handler (fn [ctx _ _] {:b 5})}]
     [[[:c] 1]]
     {::core/db       (assoc default-db :c 1)
-     :change-history [[[:c] 1]]}))
+     ::core/change-history [[[:c] 1]]}))
 
 (deftest nil-value
   (test-graph-events
@@ -78,7 +78,7 @@
       :handler (fn [_ _ _] {:b nil})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1 :b nil)
-     :change-history [[[:a] 1] [[:b] nil]]}))
+     ::core/change-history [[[:a] 1] [[:b] nil]]}))
 
 (deftest exception-bubbles-up
   (is
@@ -101,7 +101,7 @@
       :handler (fn [ctx {:keys [a]} {:keys [b]}] {:b (inc a)})}]
     [[[:a] 0]]
     {::core/db       (assoc default-db :b 1)
-     :change-history [[[:a] 0] [[:b] 1]]}))
+     ::core/change-history [[[:a] 0] [[:b] 1]]}))
 
 (deftest same-input-as-output
   (test-graph-events
@@ -110,7 +110,7 @@
       :handler (fn [ctx {:keys [a]} _] {:a (inc a)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 2)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:a] 2]]}))
 
 (deftest cyclic-inputs
@@ -123,7 +123,7 @@
       :handler (fn [ctx {:keys [b]} {:keys [a]}] {:a (inc a)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :b 1 :a 2)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:b] 1]
                       [[:a] 2]]})
   (test-graph-events
@@ -135,7 +135,7 @@
       :handler (fn [ctx {:keys [b]} {:keys [a]}] {:a (+ b a)})}]
     [[[:a] 1] [[:b] 2]]
     {::core/db       (assoc default-db :b 3 :a 4)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:b] 2]
                       [[:b] 3]
                       [[:a] 4]]}))
@@ -150,7 +150,7 @@
       :handler (fn [ctx {:keys [c]} _] {:d (inc c)})}]
     [[[:a] 1] [[:b] 1]]
     {::core/db       (assoc default-db :a 1 :b 2 :c 1 :d 2)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:b] 1]
                       [[:b] 2]
                       [[:c] 1]
@@ -163,7 +163,7 @@
       :handler (fn [ctx {:keys [a b]} {:keys [c]}] {:c (+ a b)})}]
     [[[:a] 1] [[:b] 1]]
     {::core/db       (assoc default-db :a 1 :b 1 :c 2)
-     :change-history [[[:a] 1] [[:b] 1] [[:c] 2]]}))
+     ::core/change-history [[[:a] 1] [[:b] 1] [[:c] 2]]}))
 
 (deftest multi-output-event
   (test-graph-events
@@ -172,7 +172,7 @@
       :handler (fn [ctx {:keys [a]} {:keys [b c]}] {:b (+ a b) :c (inc c)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1 :b 1 :c 1)
-     :change-history [[[:a] 1] [[:b] 1] [[:c] 1]]}))
+     ::core/change-history [[[:a] 1] [[:b] 1] [[:c] 1]]}))
 
 (deftest multi-input-output-event-omitted-unchanged-results
   (test-graph-events
@@ -181,7 +181,7 @@
       :handler (fn [ctx {:keys [a b]} _] {:b (+ a b)})}]
     [[[:a] 1] [[:b] 1]]
     {::core/db       (assoc default-db :a 1 :b 2)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:b] 1]
                       [[:b] 2]]}))
 
@@ -192,7 +192,7 @@
       :handler (fn [ctx {:keys [a b]} {:keys [c d]}] {:b (+ a b) :c c :d d})}]
     [[[:a] 1] [[:b] 1]]
     {::core/db       (assoc default-db :a 1 :b 2)
-     :change-history [[[:a] 1]
+     ::core/change-history [[[:a] 1]
                       [[:b] 1]
                       [[:b] 2]]}))
 
@@ -206,7 +206,7 @@
       :handler (fn [ctx {:keys [c]} _] {:d (dec c)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1 :b 2)
-     :change-history [[[:a] 1] [[:b] 2]]}))
+     ::core/change-history [[[:a] 1] [[:b] 2]]}))
 
 (deftest context-access
   (test-graph-events
@@ -217,7 +217,7 @@
       :handler (fn [ctx {:keys [a]} _] {:b ((:action ctx) a)})}]
     [[[:a] 1]]
     {::core/db       (assoc default-db :a 1 :b 6)
-     :change-history [[[:a] 1] [[:b] 6]]}))
+     ::core/change-history [[[:a] 1] [[:b] 6]]}))
 
 (deftest triggering-sub-path
   (test-graph-events
@@ -227,5 +227,5 @@
                  {:h (update old-h :i + (:i h))})}]
     [[[:h :i] 1]]                                           ;; [[[:h] {:i 2}]]
     {::core/db       (assoc default-db :h {:i 2})
-     :change-history [[[:h :i] 1]
+     ::core/change-history [[[:h :i] 1]
                       [[:h] {:i 2}]]}))

@@ -165,10 +165,10 @@ We can update the state of the data by calling `domino/transact` that accepts th
 (swap! ctx domino/transact [[[:amount] 10]])
 ```
 
-The updated `ctx` contains the `:change-history` which is a simple vector of all the changes as they were applied to the data in exectution order of the events that were triggered.
+The updated `ctx` contains `:domino.core/change-history` key which is a simple vector of all the changes as they were applied to the data in execution order of the events that were triggered.
 
 ```clojure lang-eval-clojure
-(:change-history @ctx)
+(:domino.core/change-history @ctx)
 ```
 
 We can see the new context contains the updated total amount and the change history shows the order in which the changes were applied.

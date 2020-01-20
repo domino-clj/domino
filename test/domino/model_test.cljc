@@ -54,20 +54,20 @@
            (dissoc (first connected-events) :handler)))
     (is (=
           {::core/db {:user {:first-name "Bob"}}
-           :change-history  [[[:user :first-name] "Bob"]]}
+           ::core/change-history  [[[:user :first-name] "Bob"]]}
           (select-keys
             (events/execute-events {::core/db    {}
                                    ::core/graph (graph/gen-ev-graph events)}
                                   [[(id->path :fname) "Bob"]])
-            [::core/db :change-history])))
+            [::core/db ::core/change-history])))
     (is (=
           {::core/db {:user {:first-name "Bob"
                              :last-name  "Bobberton"}}
-           :change-history  [[[:user :first-name] "Bob"] [[:user :last-name] "Bobberton"]]}
+           ::core/change-history  [[[:user :first-name] "Bob"] [[:user :last-name] "Bobberton"]]}
           (select-keys
             (events/execute-events {::core/db    {}
                                    ::core/graph (graph/gen-ev-graph events)}
                                   [[(id->path :fname) "Bob"]
                                    [(id->path :lname) "Bobberton"]])
-            [::core/db :change-history])))))
+            [::core/db ::core/change-history])))))
 

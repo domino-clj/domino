@@ -115,7 +115,7 @@
                                   inputs)
                                 graph)]
     (assoc ctx :domino.core/db db
-               :change-history changes)))
+               :domino.core/change-history changes)))
 
 (defn events-inputs-as-changes [{:domino.core/keys [events-by-id db]} event-ids]
   (reduce

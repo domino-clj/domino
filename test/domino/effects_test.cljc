@@ -8,7 +8,7 @@
 (deftest effects-test
   (let [data (atom nil)]
     (effects/execute-effects!
-      {:change-history [[[:a] 1] [[:b] 1]]
+      {:domino.core/change-history [[[:a] 1] [[:b] 1]]
        :domino.core/db {:a 1 :b 1}
        :domino.core/model (model/model->paths [[:a {:id :a}]
                                                [:b {:id :b}]])

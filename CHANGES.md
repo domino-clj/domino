@@ -1,3 +1,7 @@
+### 0.3.2
+
+- - **[BREAKING]** namespaced `:change-history` key as `:domino.core/change-history`
+
 ### 0.3.1
 
 - added `domino.core/event` macro helper for declaring events
