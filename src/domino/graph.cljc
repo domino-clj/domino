@@ -1,6 +1,5 @@
 (ns domino.graph
   (:require
-    [domino.model :as model]
     [domino.util :refer [generate-sub-paths]]
     [clojure.set :refer [union]]))
 
@@ -72,7 +71,7 @@
   [events]
   (let [[graph errors]
         (reduce
-          (fn [[g errors] {i :inputs o :outputs h :handler :as ev}]
+          (fn [[g errors] {i :inputs o :outputs :as ev}]
             [(merge-with
                union
                g
