@@ -6,11 +6,11 @@
 
 (defn get-db-paths [model db paths]
   (reduce
-    (fn [id->value path]
-      (let [parent (get-in db (butlast path))]
-        (if (contains? parent (last path))
-          (assoc id->value (model/id-for-path model path) (get-in db path))
-          id->value)))
+   (fn [id->value path]
+     (let [parent (get-in db (butlast path))]
+       (if (contains? parent (last path))
+         (assoc id->value (model/id-for-path model path) (get-in db path))
+         id->value)))
     {}
     paths))
 
@@ -60,20 +60,17 @@
   ::changed-paths => queue of affected paths
   ::db => temporary relevant db within context
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
-  [edges {::keys [db executed-events] :domino.core/keys [model] :as ctx}]
+  [edges {::keys [db] :domino.core/keys [model] :as ctx}]
   (reduce
-    (fn [ctx {{:keys [async? outputs] :as event} :edge}]
-      (if (contains? executed-events event)
-        ctx
-        (let [ctx         (update ctx ::executed-events conj event)
-              old-outputs (get-db-paths (:domino.core/model ctx) db outputs)]
-          (if async?
-            (try-event event ctx db old-outputs
-                       (fn [new-outputs]
-                         (update-ctx ctx model old-outputs new-outputs)))
-            (update-ctx ctx model old-outputs (try-event event ctx db old-outputs))))))
-    ctx
-    edges))
+   (fn [ctx {{:keys [async? outputs] :as event} :edge}]
+     (let [old-outputs (get-db-paths (:domino.core/model ctx) db outputs)]
+       (if async?
+         (try-event event ctx db old-outputs
+                    (fn [new-outputs]
+                      (update-ctx ctx model old-outputs new-outputs)))
+         (update-ctx ctx model old-outputs (try-event event ctx db old-outputs)))))
+   ctx
+   edges))
 
 (defn input? [edge]
   (= :input (:relationship edge)))
@@ -91,11 +88,17 @@
   ([{::keys [changed-paths] :as ctx} graph]
    (let [x  (peek changed-paths)
          xs (pop changed-paths)]
+     ;; Select the first change to evaluate
      (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
   ([{::keys [changes] :as ctx} graph origin]
-   (let [focal-origin   (origin-path graph origin)
+   ;; Handle the change (origin) passed in, and recur as needed
+   (let [;; Select the relevant parent of the change
+         focal-origin   (origin-path graph origin)
+         ;; Get the edges of type :input for the focal-origin
          edges          (filter input? (get graph focal-origin #{}))
+         ;; Get the new graph with the handled origin removed
          removed-origin (dissoc graph focal-origin)
+         ;; Call `ctx-updater` to handle the changes associated with the given edge
          {::keys [changed-paths] :as new-ctx} (ctx-updater edges ctx)
          x              (peek changed-paths)
          xs             (pop changed-paths)]
@@ -113,7 +116,7 @@
                                         (update ::changes conj [path value])))
                                   (assoc ctx ::db db
                                              ::changed-paths empty-queue
-                                             ::executed-events #{}
+                                             ;; ::executed-events #{}
                                              ::changes [])
                                   inputs)
                                 graph)]
