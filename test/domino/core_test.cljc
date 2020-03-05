@@ -193,3 +193,14 @@
                                             :handler (fn [ctx {:keys [buz]}]
                                                        (reset! result buz))}]})]
     (is (= {:baz 1 :buz 6} (:domino.core/db (core/transact ctx [[[:baz] 1]]))))))
+
+(deftest no-key-at-path
+  (let [ctx (core/initialize {:model  [[:foo {:id :foo}]
+                                       [:bar {:id :bar}]
+                                       [:baz {:id :baz}]]
+                              :events [{:inputs  [:foo :bar]
+                                        :outputs [:baz]
+                                        :handler (fn [ctx {:keys [foo bar] :or {foo :default}} _]
+                                                   {:bar (inc bar) :baz foo})}]})]
+    (:domino.core/db (core/transact ctx [[[:bar] 1]]))
+    (is (= {:bar 2 :baz :default} (:domino.core/db (core/transact ctx [[[:bar] 1]]))))))

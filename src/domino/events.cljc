@@ -7,7 +7,10 @@
 (defn get-db-paths [model db paths]
   (reduce
     (fn [id->value path]
-      (assoc id->value (model/id-for-path model path) (get-in db path)))
+      (let [parent (get-in db (butlast path))]
+        (if (contains? parent (last path))
+          (assoc id->value (model/id-for-path model path) (get-in db path))
+          id->value)))
     {}
     paths))
 
