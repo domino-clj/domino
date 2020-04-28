@@ -59,6 +59,7 @@
    (validation/maybe-throw-exception (validation/validate-schema schema))
    ;; Construct ctx
    (let [model  (model/model->paths model)
+         ;; TODO: Generate trivial events for all paths with `:pre` or `:post` and no event associated.
          events (model/connect-events model events)]
      (initial-transaction
        {::model         model
