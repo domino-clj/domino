@@ -8,12 +8,17 @@
 (def into-set (fnil into #{}))
 
 (defn find-related
-  "finds other nodes related by eventset"
-  [input-node events]
+  "find any nodes which are connected to the node by an event
+   (e.g. for events [{:inputs [:a] :outputs [:c]} {:inputs [:b] :outputs [:a]}]
+         (find-related :a events) => '(:b)
+         (find-related :b events) => '()
+         (find-related :c events) => '(:a))"
+  [node events]
   (->> events
        (keep (fn [{:keys [inputs outputs]}]
-               (when (some #{input-node} outputs)
-                 (remove #(= input-node %) inputs))))
+               ;; Find the input-nodes of any events that have node as an output
+               (when (some #{node} outputs)
+                 (remove #(= node %) inputs))))
        (apply concat)))
 
 (defn add-nodes
