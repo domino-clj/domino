@@ -9,6 +9,31 @@
   {::root {:value m
            :allow-set? true}})
 
+
+(defn run-reaction-impl [m rxn]
+  (let [input->value #(get-in m [% :value])
+        args (case (:args-style rxn :vector)
+               :vector (mapv input->value (:args rxn))
+               :single [(input->value (:args rxn))]
+               :map    [(reduce-kv
+                         (fn [m k v]
+                           (assoc m k (input->value v)))
+                         {}
+                         (:args rxn))]
+               :rx-map (reduce
+                        (fn [m i]
+                          (assoc m i (input->value i)))
+                        {}
+                        (:args rxn)))
+        compute (comp (if (or *debug* (:debug? rxn))
+                        (fn [r] (println "Computing reaction: " (:id rxn)) r)
+                        identity)
+                      (:fn rxn))]
+    (assoc
+     rxn
+     :value
+     (apply compute args))))
+
 (defn compute-reaction [m id]
   (let [rxn (get m id)]
     (cond
@@ -35,13 +60,7 @@
             {:reaction rxn
              :id id}))
           (update m id
-                  assoc
-                 :value
-                 ((comp (if (or *debug* (:debug? rxn)) (fn [r] (println "Computing reaction: " id) r) identity) (:fn rxn))
-                  (mapv
-                   (comp :value
-                         m)
-                   (:inputs rxn)))))))))
+                  (partial run-reaction-impl m)))))))
 
 (defn compute-reaction! [m id]
   (-> m
@@ -60,6 +79,23 @@
                     {:id id}))))
 
 
+;; TODO: get-upstream
+;; TODO: get-downstream
+;; TODO: print-graph
+;; NOTE: Should we enforce `::root` as the single changeable point?
+;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
+;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
+
+(defn args->inputs [args-style args]
+  (case args-style
+    (:rx-map :vector)
+    args
+
+    :single
+    [args]
+
+    :map
+    (vec (vals args))))
 
 (defn- annotate-inputs [m id inputs f]
   (reduce
@@ -75,19 +111,35 @@
    inputs))
 
 (defn add-reaction!
+  ([m rx]
+   (add-reaction! m (:id rx) (:args rx) (:fn rx) (dissoc rx
+                                                         :id
+                                                         :inputs
+                                                         :fn)))
   ([m id f]
-   (add-reaction! m id [::root] (comp f first) {}))
-  ([m id inputs f]
-   (add-reaction! m id inputs f {}))
-  ([m id inputs f opts]
-   (-> m
-       (annotate-inputs id inputs f)
-       (assoc id (merge
-                  opts
-                  {:inputs inputs
-                   :fn f}))
-       (cond->
-           (not (:lazy? opts)) (compute-reaction id)))))
+   (add-reaction! m id ::root f {:args-style :single}))
+  ([m id args f]
+   (add-reaction! m id args f {}))
+  ([m id args f opts]
+   (let [args-style (or (:args-style opts)
+                        (cond
+                          (map? args) :map
+                          (keyword? args) :single
+                          (contains? m args) :single
+                          (vector? args) :vector
+                          :else (throw (ex-info "Unknown args style!" {:args args}))))
+         inputs (args->inputs args-style args)]
+     (-> m
+         (annotate-inputs id inputs f)
+         (assoc id (merge
+                    opts
+                    {:id id
+                     :args-style args-style
+                     :args args
+                     :inputs inputs
+                     :fn f}))
+         (cond->
+             (not (:lazy? opts)) (compute-reaction id))))))
 
 (defn clear-watchers [m trigger-id]
   (let [rxn (get m trigger-id)]
