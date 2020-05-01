@@ -1,3 +1,8 @@
+### 0.4.0 WIP
+
+- Massive Overhaul. Express all business logic in terms of constraints.
+- TODO Update changelog, tests, and docs
+
 ### 0.3.2
 
 - - **[BREAKING]** namespaced `:change-history` key as `:domino.core/change-history`
