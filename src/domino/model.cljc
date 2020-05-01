@@ -2,6 +2,9 @@
   (:require
     [domino.util :as util]))
 
+;; NOTE: Refactor model parsing to allow aggregation of parameters
+;;      -  look at reitit.impl/resolve-routes and reitit.impl/walk for inspiration
+
 (defn normalize [path-segment]
   (if (map? (second path-segment))
     path-segment
@@ -28,6 +31,7 @@
       (-> model
           (update :id->path assoc id path)
           (update :path->id assoc path id)
+          ;; NOTE: provide option to aggregate opt
           (update :id->opts assoc id opts)))
     {}
     (apply merge (map paths-by-id model))))
@@ -105,4 +109,3 @@
             (update :inputs #(map path-for-id %))
             (update :outputs #(map path-for-id %))))
       events)))
-

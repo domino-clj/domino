@@ -1,13 +1,16 @@
 (ns domino.core
   (:require
-    [domino.effects :as effects]
-    [domino.events :as events]
-    [domino.graph :as graph]
-    [domino.model :as model]
-    [domino.validation :as validation]
-    [domino.util :as util]
-    [domino.rx :as rx]))
+   [domino.effects :as effects]
+   [domino.events :as events]
+   [domino.graph :as graph]
+   [domino.model :as model]
+   [domino.validation :as validation]
+   [domino.util :as util]
+   [domino.rx :as rx]))
 
+
+;; TODO: remove example stuff
+;; TODO: update logging to use log levels
 
 (def eg-schema
   "Note, this would be generated from a more idiomatic/readable syntax, akin to the model declaration from domino."
@@ -30,73 +33,194 @@
      :resolver {:query {:a [:a] :b [:b]}
                 :return {:c [:c]}
                 :fn (fn [{:keys [a b]}]
-                      {:c (+ a b)})}}]})
+                      {:c (+ a b)})}}]
+   :reactions
+   [{:id [:a]
+     :args ::db
+     :fn #(:a % 0)} ;; NOTE: could place defaults here
+    {:id [:b]
+     :args ::db
+     :fn #(:b % 0)}
+    {:id [:c]
+     :args ::db
+     :fn #(:c % 0)}]})
 
-(def eg-reactions
-  [[::db {:args ::rx/root
-          :fn ::db}]
-   [[:a] {:args ::db
-          :fn #(:a % 0)}] ;; NOTE: could place defaults here
-   [[:b] {:args ::db
-          :fn #(:b % 0)}]
-   [[:c] {:args ::db
-          :fn #(:c % 0)}]
-   [:pred/a-is-valid? {:args {:a [:a]}
-                       :fn (fn [{:keys [a]}]
-                             (and (integer? a)
-                                  (even? a)))}]
-   ;; TODO: include ID on value passed to inputs
-   [:pred/b-is-valid? {:args {:b [:b]}
-                       :fn (fn [{:keys [b]}]
-                             (and (integer? b)))}]
-   [:query/compute-c  {:args [[:a] [:b] [:c]]
-                       :fn (fn [a b c]
-                             {:a a
-                              :b b
-                              :c c})}]
-   [:pred/compute-c {:args :query/compute-c
-                     :fn (fn [{:keys [a b c]}]
-                           (when-not (= c (+ a b))
-                             :resolver/compute-c))}]
-   [:resolver/compute-c {:args :query/compute-c ;; TODO: some other additional inputs from resolver
-                         :lazy? true
-                         :fn (fn [{:keys [a b]}]
-                               ;; Compute changeset from resolver's return declaration
-                               [[[:c] (+ a b)]])}]
-   [:domino/conflicts? {:args [:pred/a-is-valid? :pred/b-is-valid? :pred/compute-c]
-                        :fn (fn [& preds]
-                              (not-empty
-                               (filter
-                                #(and (not (true? %)) (some? %))
-                                preds)))}]])
+(defn get-db [ctx]
+  (-> ctx ::rx ::db :value))
 
-(defn transact [state changes]
+(defn transact [{state ::rx :as ctx} changes]
+  (println "\n\nTransacting... ")
+  (clojure.pprint/pprint (get-in state [::db :value]))
+  (clojure.pprint/pprint changes)
+  (let [append-db-hash! (fn [ctx] (let [hashes (::db-hashes ctx #{})
+                                        h (hash (get-db ctx))]
+                                    (if (hashes h)
+                                      (throw (ex-info "Repeated DB state within transaction!"
+                                                      {:hashes hashes
+                                                       ::db (get-db ctx)}))
+                                      (do (println h " -- " hashes)
+                                        (update ctx ::db-hashes (fnil conj #{}) h)))))
+        {state ::rx :as ctx} (-> ctx
+                                 append-db-hash!
+                                 (update ::rx rx/update-root update ::db #(reduce
+                                                                           (fn [db [path value]]
+                                                                             ;; TODO: add special path types/segments/structures for advanced change types
+                                                                             ;;       e.g. transposition, splicing, etc.
+                                                                             (assoc-in db path value))
+                                                                           %
+                                                                           changes)))]
+    (println "Applied changes. Got:")
+    (clojure.pprint/pprint (get-in state [::db :value]))
+    (println "Checking for conflicts...")
+       ;; TODO: decide if this is guaranteed to halt, and either amend it so that it is, or add a timeout.
+       ;;       if a timeout is added, add some telemetry to see where cycles arise.
+       (let [{::keys [unresolvable resolvers]
+              :as conflicts} (rx/get-reaction state ::conflicts)]
+         (if (empty? conflicts)
+           (println "No conflicts!")
+           (do
+             (println "Conflicts found:")
+             (clojure.pprint/pprint conflicts)))
+         (cond
+           (empty? conflicts)
+           (do
+             (println "Transaction finished successfully!")
+             (clojure.pprint/pprint (get-in state [::db :value]))
+             (dissoc ctx ::db-hashes))
+
+           (not-empty unresolvable)
+           (throw (ex-info "Unresolvable constraint conflicts exist!"
+                           {:unresolvable unresolvable
+                            :conflicts conflicts}))
+
+           ;; TODO: aggregate compatible changes from resolvers, or otherwise synthesize a changeset from a group of resolvers.
+           (not-empty resolvers)
+           (let [resolver-id (first (vals resolvers))
+                 {state ::rx :as ctx} (update ctx ::rx rx/compute-reaction resolver-id)
+                 changes (rx/get-reaction state resolver-id)]
+             (println "[DEBUG(println)] - attempting resolver: " resolver-id " ... changes: " changes)
+             (recur ctx changes))
+
+           :else
+           (throw (ex-info "Unexpected key on :domino/conflicts. Expected :domino.core/resolvers, :domino.core/passed, and/or :domino.core/unresolvable."
+                           {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
+                            :conflicts conflicts
+                            :reaction-definition (get state ::conflicts)}))))))
+
+(def default-reactions [{:id ::db
+                         :args ::rx/root
+                         :fn ::db}
+                        ;; NOTE: send hash to user for each change to guarantee synchronization
+                        ;;       - Also, for each view declared, create a sub for the sub-db it cares about
+                        ;;       - Also, consider keeping an aggregate of transactions outside of ::db (or each view) to enable looking up an incremental changeset, rather than a total refresh
+                        ;;       - This is useful, because if a hash corresponds to a valid ::db on the server, it can be used to ensure that the client is also valid without using rules.
+                        ;;       - Also, we can store *just* the hash in the history, rather than the whole historical DB.
+                        ;; NOTE: locks could be subscriptions that use hash and could allow for compare-and-swap style actions
+                        {:id [::db :util/hash]
+                         :args ::db
+                         :fn hash}
+                        {:id ::conflicts
+                         :args-style :rx-map
+                         :args []
+                         :fn (fn [preds]
+                              ;; NOTE: Should this be made a lazy seq?
+                              (let [conflicts
+                                    (reduce-kv
+                                     (fn [m pred-id result]
+                                       (cond
+                                         ;;TODO: add other categories like not applicable or whatever comes up
+
+                                         (or (true? result) (nil? result))
+                                         (update m ::passed (fnil conj #{}) pred-id)
+
+                                         (false? result)
+                                         (update m ::unresolvable (fnil assoc {}) pred-id {:id pred-id
+                                                                                           :message (str "Constraint predicate " pred-id " failed!")})
+
+                                         (and (vector? result) (= (first result) ::resolver))
+                                         (update m ::resolvers (fnil assoc {}) pred-id result)
+
+                                         :else
+                                         (update m ::unresolvable (fnil assoc {}) pred-id (if (and (map? result)
+                                                                                                   (contains? result :message)
+                                                                                                   (contains? result :id))
+                                                                                            result
+                                                                                            {:id pred-id
+                                                                                             :message (str "Constraint predicate " pred-id " failed!")
+                                                                                             :result result}))))
+                                     {}
+                                     preds)]
+                                (when (not-empty (dissoc conflicts ::passed))
+                                  conflicts)))}])
+
+(defn parse-reactions [schema]
+  (-> default-reactions
+      ;; TODO Add reactions parsed from model
+      ;; TODO Add reactions parsed from other places (e.g. events/constraints)
+      (into (:reactions schema))))
+#_
+{:id :compute-c
+ :query {:a [:a]
+         :b [:b]
+         :c [:c]}
+ :pred (fn [{:keys [a b c] :or {a 0 b 0 c 0}}]
+         (= c (+ a b)))
+ :resolver {:query {:a [:a] :b [:b]}
+            :return {:c [:c]}
+            :fn (fn [{:keys [a b]}]
+                  {:c (+ a b)})}}
+
+(defn passing-constraint-result? [result]
+  (or (true? result) (nil? result)))
+
+(defn add-constraints! [rx-map constraints]
+  ;; TODO add means of correlating realized path to constraint and resolver
   (reduce
-   (fn [s [path value]]
-     (rx/update-root s update ::db assoc-in path value))
-   state
-   changes))
+   (fn [rx-map constraint]
+     (let [resolver (:resolver constraint)
+           pred-reaction {:id [::constraint (:id constraint)]
+                          :args-style :map
+                          :args (:query constraint)
+                          :fn
+                          (if resolver
+                            (comp #(if (passing-constraint-result? %)
+                                     %
+                                     [::resolver (:id constraint)])
+                                  (:pred constraint))
+                            (:pred constraint))}
+           ]
+       (-> rx-map
+           (rx/add-reaction! pred-reaction)
+           (rx/add-reaction! (update (get rx-map ::conflicts)
+                                     :args
+                                     (fnil conj [])
+                                     (:id pred-reaction)))
+           (cond->
+               resolver (rx/add-reaction! {:id [::resolver (:id constraint)]
+                                           :args-style :map
+                                           :args (:query resolver)
+                                           :fn (comp
+                                                (fn [result]
+                                                  (reduce-kv
+                                                   (fn [changes ret-k path]
+                                                     (if (contains? result ret-k)
+                                                       (conj changes [path (get result ret-k)])
+                                                       changes))
+                                                   []
+                                                   (:return resolver)))
+                                                (:fn resolver))})))))
+   rx-map
+   constraints))
 
 (defn initialize
   ([schema] (initialize schema {}))
   ([schema initial-db]
    ;; TODO: parse queries into reactions
-   (let [state (reduce
-                (fn [m [id rxn]]
-                  (rx/add-reaction! m (assoc rxn :id id)))
-                (rx/create-reactive-map {::db initial-db})
-                schema)]
-     (if-some [conflicts (rx/get-reaction state :domino/conflicts?)]
-       (do
-         ;; 1. find unresolvable conflicts and fail fast
-         ;; 2. find all resolvers and run
-         (let [resolver-id (some #(and (keyword? %) (= (namespace %) "resolver") %) conflicts)
-               state (rx/compute-reaction state resolver-id)
-               changes (rx/get-reaction state resolver-id)]
-           (transact state changes)
-           ;; TODO: loop recur until resolved
-           )
-         )))))
+   (let [state (-> (rx/create-reactive-map {::db initial-db})
+                   (rx/add-reactions!
+                    (parse-reactions schema))
+                   (add-constraints! (:constraints schema)))]
+     (transact {::rx state} []))))
 
 ;; ==============================================================================
 ;; OLD VERSION

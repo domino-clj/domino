@@ -2,6 +2,7 @@
   (:require [clojure.set :refer [union]]))
 
 ;; NOTE: may want to refactor to allow optional params to a reaction (e.g. lookup)
+;; NOTE: may want to look at reitit's approach of composing matchers or something
 
 (def ^:dynamic *debug* true)
 
@@ -20,11 +21,11 @@
                            (assoc m k (input->value v)))
                          {}
                          (:args rxn))]
-               :rx-map (reduce
-                        (fn [m i]
-                          (assoc m i (input->value i)))
-                        {}
-                        (:args rxn)))
+               :rx-map [(reduce
+                         (fn [m i]
+                           (assoc m i (input->value i)))
+                         {}
+                         (:args rxn))])
         compute (comp (if (or *debug* (:debug? rxn))
                         (fn [r] (println "Computing reaction: " (:id rxn)) r)
                         identity)
@@ -86,16 +87,33 @@
 ;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
 ;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
 
-(defn args->inputs [args-style args]
-  (case args-style
-    (:rx-map :vector)
-    args
+(defn infer-args-style
+  ([m args]
+   (cond
+     (map? args) :map
+     (keyword? args) :single
+     (contains? m args) :single
+     (vector? args) :vector
+     :else (throw (ex-info "Unknown args style!" {:args args}))))
+  ([m args default]
+   (cond
+     (map? args) :map
+     (keyword? args) :single
+     (contains? m args) :single
+     (vector? args) :vector
+     :else default)))
 
-    :single
-    [args]
+(defn args->inputs
+  ([args-style args]
+   (case args-style
+     (:rx-map :vector)
+     args
 
-    :map
-    (vec (vals args))))
+     :single
+     [args]
+
+     :map
+     (vec (vals args)))))
 
 (defn- annotate-inputs [m id inputs f]
   (reduce
@@ -122,12 +140,7 @@
    (add-reaction! m id args f {}))
   ([m id args f opts]
    (let [args-style (or (:args-style opts)
-                        (cond
-                          (map? args) :map
-                          (keyword? args) :single
-                          (contains? m args) :single
-                          (vector? args) :vector
-                          :else (throw (ex-info "Unknown args style!" {:args args}))))
+                        (infer-args-style m args))
          inputs (args->inputs args-style args)]
      (-> m
          (annotate-inputs id inputs f)
@@ -140,6 +153,52 @@
                      :fn f}))
          (cond->
              (not (:lazy? opts)) (compute-reaction id))))))
+
+(defn add-reactions! [reactive-map reactions]
+  (let [get-inputs (fn [m rxn]
+                     ;; NOTE: since infer-args-style is based on a complete map, we must set a default
+                     (args->inputs
+                      (or (:args-style rxn)
+                          (infer-args-style m (:args rxn) :single))
+                      (:args rxn)))]
+    (loop [m reactive-map
+           blocked {}
+           blocking {}
+           [rxn :as rxns] reactions]
+      (println "attempting to add: " (:id rxn))
+      (if (empty? rxns)
+        (if (empty? blocked)
+          m
+          (throw (ex-info "Some reactions have inputs which don't exist!"
+                          {:blocked blocked
+                           :missing (keys blocking)})))
+        (if-let [blocks (not-empty
+                         (set
+                          (remove
+                           (partial contains? m)
+                           (get-inputs m rxn))))]
+          (do
+            (println "BLOCKED BY: " blocks)
+            (recur m
+                   (assoc blocked rxn blocks)
+                   (reduce
+                    (fn [acc in]
+                      (update acc in (fnil conj #{}) rxn))
+                    blocking
+                    blocks)
+                   (subvec rxns 1)))
+          (let [unblock (get blocking (:id rxn))
+                [ready blocked] (reduce
+                                 (fn [[racc bacc] r]
+                                   (if-some [r-blocks (not-empty (disj (get bacc r) (:id rxn)))]
+                                     [racc (assoc bacc r r-blocks)]
+                                     [(conj racc r) (dissoc bacc r)]))
+                                 [[] blocked]
+                                 unblock)]
+            (recur (add-reaction! m rxn)
+                   blocked
+                   (dissoc blocking (:id rxn))
+                   (into ready (subvec rxns 1)))))))))
 
 (defn clear-watchers [m trigger-id]
   (let [rxn (get m trigger-id)]
