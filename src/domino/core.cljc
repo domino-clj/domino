@@ -10,7 +10,35 @@
 
 
 ;; TODO: remove example stuff
-;; TODO: update logging to use log levels
+;; TODO: Add support for async calls in resolvers
+;; TODO: Add ability for resolvers to compare query to previous value ()
+;; TODO: Add key on constraint to determine retry behaviour
+;;       - run-multiple
+;;       - run-and-fail
+;;       - run-and-skip
+;; TODO: Default query for resolver should be constraint query
+
+;; Flatten out constraints
+
+(def example-constraint
+  {:id [:some :id]
+   :query {:a [:a]
+           :b [:path :to :b]}
+   :pred (fn [{:keys [a b]}]
+           (< a b))
+   :resolver (fn [{:keys [a b]}]
+               {:a (dec b)})})
+
+(def example-event
+  "rename?"
+  {:id [:some :id]
+   :query {:a [:a]
+           :b [:path :to :b]
+           :user-name [::ctx :userid]}
+   :return {:a [:a]
+            :c [:path :to :c]}
+   :fn (fn [{:keys [a b user-name]} {old-a :a old-c :c :as old}]
+         {:a (str user-name b)})})
 
 (def eg-schema
   "Note, this would be generated from a more idiomatic/readable syntax, akin to the model declaration from domino."
@@ -24,6 +52,50 @@
      :query {:b [:b]}
      :pred (fn [{:keys [b]}]
              (and (integer? b)))}
+    {:id :x-is-even-or-one?
+     :query {:x [:x]}
+     :pred (fn [{:keys [x]}]
+             (or (= 1 x)
+                 (even? x)))
+     :resolver
+     {:query {:x [:x]}
+      :return {:x [:x]}
+      :fn (fn [{:keys [x]}]
+            {:x (+ (* x 3) 1)})}}
+    {:id :x-is-odd-or-one?
+     :query {:x [:x]}
+     :pred (fn [{:keys [x]}]
+             (or (= 1 x)
+                 (odd? x)))
+     :resolver
+     {:query {:x [:x]}
+      :return {:x [:x]}
+      :fn (fn [{:keys [x]}]
+            {:x (quot x 2)})}}
+
+    ;; query
+    ;; {:a [:a ...]}
+    ;; outputs
+    ;; {}
+
+    #_
+    {:id :compute-b-from-a
+     :query {:a [:a]}
+     :pred (fn [{:keys [a] :or {a 0}}]
+             (odd? a))
+     :resolver {:input {:a [:a]}
+                :fn (fn [{:keys [a]}]
+                      {:b (* 2 a)})
+                :return {:b [:b]}}}
+    #_
+    {:id :compute-a-from-b
+     :query {:b [:b]}
+     :pred (fn [{:keys [b] :or {b 0}}]
+             (odd? b))
+     :resolver {:query {:b [:b]}
+                :return {:a [:a]}
+                :fn (fn [{:keys [a]}]
+                      {:b (* 2 a)})}}
     {:id :compute-c
      :query {:a [:a]
              :b [:b]
@@ -35,7 +107,10 @@
                 :fn (fn [{:keys [a b]}]
                       {:c (+ a b)})}}]
    :reactions
-   [{:id [:a]
+   [{:id [:x]
+     :args ::db
+     :fn #(:x % 0)}
+    {:id [:a]
      :args ::db
      :fn #(:a % 0)} ;; NOTE: could place defaults here
     {:id [:b]
@@ -76,6 +151,7 @@
        ;;       if a timeout is added, add some telemetry to see where cycles arise.
        (let [{::keys [unresolvable resolvers]
               :as conflicts} (rx/get-reaction state ::conflicts)]
+         (println (rx/get-reaction state ::conflicts))
          (if (empty? conflicts)
            (println "No conflicts!")
            (do
@@ -120,7 +196,7 @@
                          :args ::db
                          :fn hash}
                         {:id ::conflicts
-                         :args-style :rx-map
+                         :args-format :rx-map
                          :args []
                          :fn (fn [preds]
                               ;; NOTE: Should this be made a lazy seq?
@@ -179,7 +255,7 @@
    (fn [rx-map constraint]
      (let [resolver (:resolver constraint)
            pred-reaction {:id [::constraint (:id constraint)]
-                          :args-style :map
+                          :args-format :map
                           :args (:query constraint)
                           :fn
                           (if resolver
@@ -197,7 +273,7 @@
                                      (:id pred-reaction)))
            (cond->
                resolver (rx/add-reaction! {:id [::resolver (:id constraint)]
-                                           :args-style :map
+                                           :args-format :map
                                            :args (:query resolver)
                                            :fn (comp
                                                 (fn [result]

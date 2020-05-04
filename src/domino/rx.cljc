@@ -1,10 +1,19 @@
 (ns domino.rx
   (:require [clojure.set :refer [union]]))
 
+;; ==============================================================================
+;; ABOUT
+;; this namespace provides a reactive-map abstraction based on reagent/re-frame.
+;; Instead of using state, we expose a means of registering reactions along with
+;; an update function. The update function triggers recomputation of registered
+;; reactions from changed pieces of state. It will run any reactions with changed
+;; inputs exactly once.
+;;
+;; ==============================================================================
+
 ;; NOTE: may want to refactor to allow optional params to a reaction (e.g. lookup)
 ;; NOTE: may want to look at reitit's approach of composing matchers or something
 
-(def ^:dynamic *debug* true)
 
 (defn create-reactive-map [m]
   {::root {:value m
@@ -13,7 +22,7 @@
 
 (defn run-reaction-impl [m rxn]
   (let [input->value #(get-in m [% :value])
-        args (case (:args-style rxn :vector)
+        args (case (:args-format rxn :vector)
                :vector (mapv input->value (:args rxn))
                :single [(input->value (:args rxn))]
                :map    [(reduce-kv
@@ -26,9 +35,9 @@
                            (assoc m i (input->value i)))
                          {}
                          (:args rxn))])
-        compute (comp (if (or *debug* (:debug? rxn))
-                        (fn [r] (println "Computing reaction: " (:id rxn)) r)
-                        identity)
+        compute (comp (fn [r] (println "[DEBUG]" "Computing reaction:")
+                        (clojure.pprint/pprint r)
+                        r)
                       (:fn rxn))]
     (assoc
      rxn
@@ -73,8 +82,7 @@
     (if (contains? rxn :value)
      (:value rxn)
      (do
-       ;;TODO Convert to log/warn cljc
-       (println "[WARN(println)] value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
+       (util/warn "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
        (get-reaction (compute-reaction m id) id)))
     (throw (ex-info (str "Reaction with id: " id " is not registered!")
                     {:id id}))))
@@ -87,7 +95,7 @@
 ;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
 ;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
 
-(defn infer-args-style
+(defn infer-args-format
   ([m args]
    (cond
      (map? args) :map
@@ -104,8 +112,8 @@
      :else default)))
 
 (defn args->inputs
-  ([args-style args]
-   (case args-style
+  ([args-format args]
+   (case args-format
      (:rx-map :vector)
      args
 
@@ -135,37 +143,53 @@
                                                          :inputs
                                                          :fn)))
   ([m id f]
-   (add-reaction! m id ::root f {:args-style :single}))
+   (add-reaction! m id ::root f {:args-format :single}))
   ([m id args f]
    (add-reaction! m id args f {}))
   ([m id args f opts]
-   (let [args-style (or (:args-style opts)
-                        (infer-args-style m args))
-         inputs (args->inputs args-style args)]
+   (let [args-format (or (:args-format opts)
+                        (infer-args-format m args))
+         inputs (args->inputs args-format args)]
      (-> m
          (annotate-inputs id inputs f)
          (assoc id (merge
                     opts
                     {:id id
-                     :args-style args-style
+                     :args-format args-format
                      :args args
                      :inputs inputs
+                     ;; Order invariant is for computation of inputs. It ensures that new computations are resolved in proper order.
+                     ;; It is the largest of the order invariants of it's inputs, plus one.
+                     ;; This means that if all triggered changes with lower order invariant have been computed,
+                     ;;   then all triggered parents must've been computed.
+                     ;; Additionally, any changes triggered must have a higher order invariant.
+                     :order-invariant
+                     (inc
+                      (reduce
+                       (fnil max 0 0)
+                       0
+                       (map (comp :order-invariant (partial get m)) inputs)))
+                     :parents (reduce into #{} (map (fn [i]
+                                                      (conj
+                                                       (:parents (get m i) #{})
+                                                       i))
+                                                    inputs))
                      :fn f}))
          (cond->
              (not (:lazy? opts)) (compute-reaction id))))))
 
 (defn add-reactions! [reactive-map reactions]
   (let [get-inputs (fn [m rxn]
-                     ;; NOTE: since infer-args-style is based on a complete map, we must set a default
+                     ;; NOTE: since infer-args-format is based on a complete map, we must set a default
                      (args->inputs
-                      (or (:args-style rxn)
-                          (infer-args-style m (:args rxn) :single))
+                      (or (:args-format rxn)
+                          (infer-args-format m (:args rxn) :single))
                       (:args rxn)))]
     (loop [m reactive-map
            blocked {}
            blocking {}
            [rxn :as rxns] reactions]
-      (println "attempting to add: " (:id rxn))
+      (println "[DEBUG]" "attempting to add: " (:id rxn))
       (if (empty? rxns)
         (if (empty? blocked)
           m
@@ -178,7 +202,7 @@
                            (partial contains? m)
                            (get-inputs m rxn))))]
           (do
-            (println "BLOCKED BY: " blocks)
+            (println "[DEBUG]" "BLOCKED BY: " blocks)
             (recur m
                    (assoc blocked rxn blocks)
                    (reduce
@@ -201,7 +225,47 @@
                    (into ready (subvec rxns 1)))))))))
 
 (defn clear-watchers [m trigger-id]
-  (let [rxn (get m trigger-id)]
+  (let [rxn (get m trigger-id)
+        add-ids-by-invariant (partial reduce
+                              (fn [acc id]
+                                (update acc
+                                        (:order-invariant
+                                         (get m id)
+                                         0)
+                                        (fnil conj #{})
+                                        id)))]
+    (loop [m m
+           triggered-by-order-invariant (add-ids-by-invariant (sorted-map) (:watchers rxn))]
+      (println "ID: " trigger-id)
+      (println "TRIGGERED: " triggered-by-order-invariant)
+      (if (empty? triggered-by-order-invariant)
+        m
+        (let [[k triggered] (first triggered-by-order-invariant)
+              _ (println "Handling invariant: " k)
+              [m sorted-triggers]
+              (reduce
+               ;; NOTE: this is re-running reactions for each input that changes
+               ;;       we should wait for all inputs to resolve, and then resume.
+               (fn [[m sorted-triggers] id]
+                 (let [{:keys [lazy? value watchers] :as inner-rxn} (get m id)]
+                   (println "Handling ID: " id "lazy? " lazy? "watchers: " (add-ids-by-invariant sorted-triggers watchers))
+                   (if lazy?
+                     [(-> m
+                          (update id dissoc :value))
+                      (add-ids-by-invariant sorted-triggers watchers)]
+                     (let [m (compute-reaction! m id)]
+                       (if (= (get-reaction m id) value)
+                         (do
+                           (println "ID:" id " unchanged.")
+                           [m sorted-triggers])
+                         (do
+                           (println "ID: " id "was changed!")
+                           (println "Value of ID:" id "\n" value "\n->\n" (get-reaction m id))
+                           [m (add-ids-by-invariant sorted-triggers watchers)]))))))
+               [m (dissoc triggered-by-order-invariant k)]
+               triggered)]
+          (recur m sorted-triggers))))
+    #_
     (reduce
      ;; NOTE: this is re-running reactions for each input that changes
      ;;       we should wait for all inputs to resolve, and then resume.

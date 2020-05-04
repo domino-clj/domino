@@ -12,5 +12,5 @@
 (defn map-by-id [items]
   (->> items
        (filter #(contains? % :id))
-       (map (juxt :id identity))    
+       (map (juxt :id identity))
        (into {})))
