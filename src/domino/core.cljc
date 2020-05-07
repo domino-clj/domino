@@ -42,83 +42,58 @@
 
 (def eg-schema
   "Note, this would be generated from a more idiomatic/readable syntax, akin to the model declaration from domino."
-  {:constraints
-   [{:id :a-is-valid?
-     :query {:a [:a]}
-     :pred (fn [{:keys [a]}]
-             (and (integer? a)
-                  (odd? a)))}
-    {:id :b-is-valid?
-     :query {:b [:b]}
-     :pred (fn [{:keys [b]}]
-             (and (integer? b)))}
-    {:id :x-is-even-or-one?
-     :query {:x [:x]}
-     :pred (fn [{:keys [x]}]
-             (or (= 1 x)
-                 (even? x)))
-     :resolver
-     {:query {:x [:x]}
-      :return {:x [:x]}
-      :fn (fn [{:keys [x]}]
-            {:x (+ (* x 3) 1)})}}
-    {:id :x-is-odd-or-one?
-     :query {:x [:x]}
-     :pred (fn [{:keys [x]}]
-             (or (= 1 x)
-                 (odd? x)))
-     :resolver
-     {:query {:x [:x]}
-      :return {:x [:x]}
-      :fn (fn [{:keys [x]}]
-            {:x (quot x 2)})}}
+  {:model [[:a+b=c
+            [:a {:id             :a
+                 :val-if-missing 1}]
+            [:b {:id             :b
+                 :val-if-missing 0}]
+            [:c {:id             :c
+                 :val-if-missing 1}]]
+           [:collatz
+            [:x {:id             :x
+                 :val-if-missing 1}]]]
 
-    ;; query
-    ;; {:a [:a ...]}
-    ;; outputs
-    ;; {}
+   :constraints
+   [{:id    :a-is-valid?
+     :query {:a :a}
+     :pred  (fn [{:keys [a]}]
+              (and (integer? a)
+                   (odd? a)))}
+    {:id    :b-is-valid?
+     :query {:b :b}
+     :pred  (fn [{:keys [b]}]
+              (and (integer? b)))}
+    {:id    :x-is-even-or-one?
+     :query {:x :x}
+     :pred  (fn [{:keys [x]}]
+              (or (= 1 x)
+                  (even? x)))
+     :resolver
+     {:query  {:x :x}
+      :return {:x [:collatz :x]}
+      :fn     (fn [{:keys [x]}]
+                {:x (+ (* x 3) 1)})}}
+    {:id    :x-is-odd-or-one?
+     :query {:x :x}
+     :pred  (fn [{:keys [x]}]
+              (or (= 1 x)
+                  (odd? x)))
+     :resolver
+     {:query  {:x :x}
+      :return {:x [:collatz :x]}
+      :fn     (fn [{:keys [x]}]
+                {:x (quot x 2)})}}
 
-    #_
-    {:id :compute-b-from-a
-     :query {:a [:a]}
-     :pred (fn [{:keys [a] :or {a 0}}]
-             (odd? a))
-     :resolver {:input {:a [:a]}
-                :fn (fn [{:keys [a]}]
-                      {:b (* 2 a)})
-                :return {:b [:b]}}}
-    #_
-    {:id :compute-a-from-b
-     :query {:b [:b]}
-     :pred (fn [{:keys [b] :or {b 0}}]
-             (odd? b))
-     :resolver {:query {:b [:b]}
-                :return {:a [:a]}
-                :fn (fn [{:keys [a]}]
-                      {:b (* 2 a)})}}
-    {:id :compute-c
-     :query {:a [:a]
-             :b [:b]
-             :c [:c]}
-     :pred (fn [{:keys [a b c] :or {a 0 b 0 c 0}}]
-             (= c (+ a b)))
-     :resolver {:query {:a [:a] :b [:b]}
-                :return {:c [:c]}
-                :fn (fn [{:keys [a b]}]
-                      {:c (+ a b)})}}]
-   :reactions
-   [{:id [:x]
-     :args ::db
-     :fn #(:x % 0)}
-    {:id [:a]
-     :args ::db
-     :fn #(:a % 0)} ;; NOTE: could place defaults here
-    {:id [:b]
-     :args ::db
-     :fn #(:b % 0)}
-    {:id [:c]
-     :args ::db
-     :fn #(:c % 0)}]})
+    {:id       :compute-c
+     :query    {:a :a
+                :b :b
+                :c :c}
+     :pred     (fn [{:keys [a b c]}]
+                 (= c (+ a b)))
+     :resolver {:query  {:a :a :b :b}
+                :return {:c [:a+b=c :c]}
+                :fn     (fn [{:keys [a b]}]
+                          {:c (+ a b)})}}]})
 
 (defn get-db [ctx]
   (-> ctx ::rx ::db :value))
@@ -136,14 +111,14 @@
                                       (do (println h " -- " hashes)
                                         (update ctx ::db-hashes (fnil conj #{}) h)))))
         {state ::rx :as ctx} (-> ctx
-                                 append-db-hash!
                                  (update ::rx rx/update-root update ::db #(reduce
                                                                            (fn [db [path value]]
                                                                              ;; TODO: add special path types/segments/structures for advanced change types
                                                                              ;;       e.g. transposition, splicing, etc.
                                                                              (assoc-in db path value))
                                                                            %
-                                                                           changes)))]
+                                                                           changes))
+                                 append-db-hash!)]
     (println "Applied changes. Got:")
     (clojure.pprint/pprint (get-in state [::db :value]))
     (println "Checking for conflicts...")
@@ -194,46 +169,122 @@
                         ;; NOTE: locks could be subscriptions that use hash and could allow for compare-and-swap style actions
                         {:id [::db :util/hash]
                          :args ::db
-                         :fn hash}
-                        {:id ::conflicts
-                         :args-format :rx-map
-                         :args []
-                         :fn (fn [preds]
-                              ;; NOTE: Should this be made a lazy seq?
-                              (let [conflicts
-                                    (reduce-kv
-                                     (fn [m pred-id result]
-                                       (cond
-                                         ;;TODO: add other categories like not applicable or whatever comes up
+                         :fn hash}])
 
-                                         (or (true? result) (nil? result))
-                                         (update m ::passed (fnil conj #{}) pred-id)
 
-                                         (false? result)
-                                         (update m ::unresolvable (fnil assoc {}) pred-id {:id pred-id
-                                                                                           :message (str "Constraint predicate " pred-id " failed!")})
+;; TODO: flatten constraint!
+;; TODO: update query/resolver interaction so that paths are reverse engineerable and/or stored once dynamic paths are supported
 
-                                         (and (vector? result) (= (first result) ::resolver))
-                                         (update m ::resolvers (fnil assoc {}) pred-id result)
+#_{:id [:some :id]
+   :query {:a [:a]
+           :b [:path :to :b]}
+   :pred (fn [{:keys [a b]}]
+           (< a b))
+   :resolver (fn [{:keys [a b]}]
+               {:a (dec b)})}
 
-                                         :else
-                                         (update m ::unresolvable (fnil assoc {}) pred-id (if (and (map? result)
-                                                                                                   (contains? result :message)
-                                                                                                   (contains? result :id))
-                                                                                            result
-                                                                                            {:id pred-id
-                                                                                             :message (str "Constraint predicate " pred-id " failed!")
-                                                                                             :result result}))))
-                                     {}
-                                     preds)]
-                                (when (not-empty (dissoc conflicts ::passed))
-                                  conflicts)))}])
+(defn passing-constraint-result? [result]
+  (or (true? result) (nil? result)))
+
+(defn constraint->reactions [constraint]
+  (let [resolver (:resolver constraint)
+        resolver-id [::resolver (:id constraint)]
+        pred-reaction (cond->
+                          {:id [::constraint (:id constraint)]
+                           ::is-constraint? true
+                           ::has-resolver? (boolean resolver)
+                           :args-format :map
+                           :args (:query constraint)
+                           :fn
+                           (:pred constraint)}
+                        ;; TODO: handle dynamic query stuff
+                        resolver (->(assoc ::resolver-id resolver-id)
+                                    (update :fn (partial
+                                                 comp
+                                                 #(if (passing-constraint-result? %)
+                                                    %
+                                                    resolver-id)))))]
+
+    (cond-> [pred-reaction]
+      resolver (conj
+                {:id [::resolver (:id constraint)]
+                 :args-format :map
+                 :lazy? true
+                 :args (:query resolver)
+                 :fn (comp
+                      (fn [result]
+                        (reduce-kv
+                         (fn [changes ret-k path]
+                           (if (contains? result ret-k)
+                             (conj changes [path (get result ret-k)])
+                             changes))
+                         []
+                         (:return resolver)))
+                      (:fn resolver))}))))
+
+(defn model-map-merge [opts macc m]
+  ;; TODO: custom merge behaviour for privileged keys.
+  ;;       Possibly also provide a multimethod to allow custom merge beh'r for user specified keys.
+  (merge macc m))
+
+(defn clean-macc [opts m]
+  (select-keys m (into [] (:inherited-keys opts))))
+
+(defn parse-segment [segment]
+  ;; TODO: parse collection ID segments
+  ;; TODO: parse no-op segment
+  ;; TODO: parse query-style segments (e.g. first, nth...)
+  ;;        - e.g. first-where (i.e. (some #(when (pred %) %) coll)) segments (if desired?)
+  nil)
+
+#_
+{:id [:x]
+ :args ::db
+ :fn #(:x % 0)}
+
+(defn lookup-reaction [path m]
+  (if (:path-params m)
+    ;; TODO: allow for parametrized reactions to support `:path-params`
+    (throw (ex-info "Not Implemented!"
+                    {:path path
+                     :m    m}))
+    (cond-> {:id (:id m)
+             :args ::db
+             :args-format :single
+             :fn #(get-in % path (:val-if-missing m))}
+      ;; TODO: check for nearest parent rx-id and use instead of `::db`
+      )))
+
+
+
+(defn walk-model [raw-model {:as opts}]
+  (letfn [(walk-node [parent-path macc [segment & [m? :as args]]]
+            (let [[m children] (if (map? m?)
+                                 [(model-map-merge opts macc m?) (rest args)]
+                                 [macc args])
+                  ;; TODO parse-segment should handle params etc.
+                  path ((fnil conj []) parent-path (or (parse-segment segment) segment))
+                  next-macc (clean-macc opts m)]
+              (cond-> []
+                (:id m)               (conj (lookup-reaction path m))
+                (not-empty children) (into
+                                       (reduce (fn [acc child] (into acc (walk-node path next-macc child))) [] children))
+                ;; TODO: Add validation constraint parsing
+                ;; TODO: Add dispatch/expansion/compilation on path and/or m for a custom reaction collection
+                )))]
+    (reduce
+     (fn [acc sub-model]
+       (into acc (walk-node [] {} sub-model)))
+     []
+     raw-model)))
 
 (defn parse-reactions [schema]
   (-> default-reactions
       ;; TODO Add reactions parsed from model
       ;; TODO Add reactions parsed from other places (e.g. events/constraints)
-      (into (:reactions schema))))
+      (into (walk-model (:model schema) {}))
+      (into (:reactions schema))
+      (into (mapcat constraint->reactions (:constraints schema)))))
 #_
 {:id :compute-c
  :query {:a [:a]
@@ -246,47 +297,46 @@
             :fn (fn [{:keys [a b]}]
                   {:c (+ a b)})}}
 
-(defn passing-constraint-result? [result]
-  (or (true? result) (nil? result)))
 
-(defn add-constraints! [rx-map constraints]
-  ;; TODO add means of correlating realized path to constraint and resolver
-  (reduce
-   (fn [rx-map constraint]
-     (let [resolver (:resolver constraint)
-           pred-reaction {:id [::constraint (:id constraint)]
-                          :args-format :map
-                          :args (:query constraint)
-                          :fn
-                          (if resolver
-                            (comp #(if (passing-constraint-result? %)
-                                     %
-                                     [::resolver (:id constraint)])
-                                  (:pred constraint))
-                            (:pred constraint))}
-           ]
-       (-> rx-map
-           (rx/add-reaction! pred-reaction)
-           (rx/add-reaction! (update (get rx-map ::conflicts)
-                                     :args
-                                     (fnil conj [])
-                                     (:id pred-reaction)))
-           (cond->
-               resolver (rx/add-reaction! {:id [::resolver (:id constraint)]
-                                           :args-format :map
-                                           :args (:query resolver)
-                                           :fn (comp
-                                                (fn [result]
-                                                  (reduce-kv
-                                                   (fn [changes ret-k path]
-                                                     (if (contains? result ret-k)
-                                                       (conj changes [path (get result ret-k)])
-                                                       changes))
-                                                   []
-                                                   (:return resolver)))
-                                                (:fn resolver))})))))
-   rx-map
-   constraints))
+(defn get-constraint-ids [state]
+  (keep (fn [[k v]]
+          (when (::is-constraint? v)
+            k))
+        state))
+
+(defn add-conflicts-rx! [state]
+  (rx/add-reaction! state {:id ::conflicts
+                           :args-format :rx-map
+                           :args (vec (get-constraint-ids state))
+                           :fn (fn [preds]
+                                 ;; NOTE: Should this be made a lazy seq?
+                                 (let [conflicts
+                                       (reduce-kv
+                                        (fn [m pred-id result]
+                                          (cond
+                                            ;;TODO: add other categories like not applicable or whatever comes up
+                                            (or (true? result) (nil? result))
+                                            (update m ::passed (fnil conj #{}) pred-id)
+
+                                            (false? result)
+                                            (update m ::unresolvable (fnil assoc {}) pred-id {:id pred-id
+                                                                                              :message (str "Constraint predicate " pred-id " failed!")})
+
+                                            (and (vector? result) (= (first result) ::resolver))
+                                            (update m ::resolvers (fnil assoc {}) pred-id result)
+
+                                            :else
+                                            (update m ::unresolvable (fnil assoc {}) pred-id (if (and (map? result)
+                                                                                                      (contains? result :message)
+                                                                                                      (contains? result :id))
+                                                                                               result
+                                                                                               {:id pred-id
+                                                                                                :message (str "Constraint predicate " pred-id " failed!")
+                                                                                                :result result}))))
+                                        {}
+                                        preds)]
+                                   (when (not-empty (dissoc conflicts ::passed))
+                                     conflicts)))}))
 
 (defn initialize
   ([schema] (initialize schema {}))
@@ -295,7 +345,7 @@
    (let [state (-> (rx/create-reactive-map {::db initial-db})
                    (rx/add-reactions!
                     (parse-reactions schema))
-                   (add-constraints! (:constraints schema)))]
+                   (add-conflicts-rx!))]
      (transact {::rx state} []))))
 
 ;; ==============================================================================

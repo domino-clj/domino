@@ -12,7 +12,9 @@
 ;; ==============================================================================
 
 ;; NOTE: may want to refactor to allow optional params to a reaction (e.g. lookup)
-;; NOTE: may want to look at reitit's approach of composing matchers or something
+;; NOTE: may want to look at reitit's approach of composing matchers or something?
+;; TODO: Create example use case from domino.core for a collection, then
+;;       backfill rx features.
 
 
 (defn create-reactive-map [m]
@@ -82,7 +84,7 @@
     (if (contains? rxn :value)
      (:value rxn)
      (do
-       (util/warn "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
+       (println "[WARN]" "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
        (get-reaction (compute-reaction m id) id)))
     (throw (ex-info (str "Reaction with id: " id " is not registered!")
                     {:id id}))))

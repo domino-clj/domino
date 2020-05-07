@@ -12,3 +12,5 @@ out/
 docs/out/
 pom.xml.asc
 build.xml
+
+.repl-history
