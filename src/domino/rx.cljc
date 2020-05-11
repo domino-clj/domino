@@ -15,12 +15,23 @@
 ;; NOTE: may want to look at reitit's approach of composing matchers or something?
 ;; TODO: Create example use case from domino.core for a collection, then
 ;;       backfill rx features.
+;; NOTE: for collections, allow for transitive use of params, also allow for complete set of allowed params.
 
 
 (defn create-reactive-map [m]
   {::root {:value m
-           :allow-set? true}})
+           :allow-set? true}
+   ::rx-matcher {}})
 
+;; Process for dynamic reactions:
+;; 1. look for static impl.
+;; 2. fallback to matcher and add static reification w/ watcher annotation. (annotate so that change => removal of reified rx)
+;; 3. if match fails, error.
+
+
+;; Reified-rx is of the form `[::dynamic <rx-id> <rx-params>]`
+;; Reified-rx has an additional key `::params` on the body which is provided on add
+;; Compute will reify parents
 
 (defn run-reaction-impl [m rxn]
   (let [input->value #(get-in m [% :value])
@@ -46,56 +57,48 @@
      :value
      (apply compute args))))
 
-(defn compute-reaction [m id]
-  (let [rxn (get m id)]
-    (cond
-      (nil? rxn)
-      (throw
-       (ex-info (str "Reaction with id: " id " is not registered!")
-                {:id id}))
+(declare add-reaction!)
 
-      (contains? rxn :value)
+(defn dynamic-id [id params]
+  [::dynamic id params])
+
+;; NOTE: I don't like this very much, but maybe it's okay?
+;;       Let's play with it and see what we can do.
+;;       May potentially change it so that *all* reactions have params, but some are static.
+
+
+(defn annotate-dynamic-reaction! [m id params]
+  (update-in m [::rx-matcher id :instances] (fnil conj #{}) (dynamic-id id params)))
+
+(defn reify-dynamic-reaction! [m id params]
+  (let [dyn-id (dynamic-id id params)]
+    (if (contains? m dyn-id)
       m
+      (if-let [rx-gen (get (::rx-matcher m) id)]
+        (let [rxn ((:fn rx-gen) dyn-id)
+              upstream (:inputs rxn)]
+          (-> (reduce
+               (fn [m up]
+                 (cond
+                   (contains? m up)
+                   m
 
-      :else
-      (if-some [input-to-compute
-                (->> (:inputs rxn)
-                     (map (partial get m))
-                     (some #(when-not (contains? % :value) %)))]
-        (-> m
-            (compute-reaction input-to-compute)
-            (compute-reaction id))
-        (if (nil? (:fn rxn))
-          (throw
-           (ex-info
-            (str "No function defined for reaction: " id "!")
-            {:reaction rxn
-             :id id}))
-          (update m id
-                  (partial run-reaction-impl m)))))))
+                   (= ::dynamic (first up))
+                   (reify-dynamic-reaction! m (nth up 1) (nth up 2))
 
-(defn compute-reaction! [m id]
-  (-> m
-      (update id dissoc :value)
-      (compute-reaction id)))
-
-(defn get-reaction [m id]
-  (if-let [rxn (get m id)]
-    (if (contains? rxn :value)
-     (:value rxn)
-     (do
-       (println "[WARN]" "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
-       (get-reaction (compute-reaction m id) id)))
-    (throw (ex-info (str "Reaction with id: " id " is not registered!")
-                    {:id id}))))
-
-
-;; TODO: get-upstream
-;; TODO: get-downstream
-;; TODO: print-graph
-;; NOTE: Should we enforce `::root` as the single changeable point?
-;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
-;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
+                   :else
+                   (throw (ex-info (str "No reaction found for id: " up)
+                                   {:parent-rx (dynamic-id id params)
+                                    :missing-rx up}))))
+               m
+               upstream)
+              (add-reaction!
+               rxn)
+              (annotate-dynamic-reaction!
+               id
+               params)))
+        (throw (ex-info (str "No dynamic reaction matches: " id)
+                        {:id id}))))))
 
 (defn infer-args-format
   ([m args]
@@ -125,7 +128,100 @@
      :map
      (vec (vals args)))))
 
-(defn- annotate-inputs [m id inputs f]
+(defn add-dynamic-reaction! [m rx-spec]
+  ;; TODO: clear all old reified rx
+  (let [id (:id rx-spec)
+        rx-gen {:fn (fn [[_ id params :as dyn-id]] ;; TODO: clean-up
+                      {:id dyn-id
+                       :dynamic? true
+                       ::params params
+                       :args-format :rx-map
+                       :args ((:inputs-fn rx-spec) dyn-id) ;; TODO: generate inputs-fn
+                       :inputs ((:inputs-fn rx-spec) dyn-id)
+                       :fn (fn [input-map]
+                             ((:rxn-fn rx-spec)
+                              ((:args-fn rx-spec #(assoc %1 :params %2)) input-map params)))})}
+        ;;TODO add different args-fns depending on `:args-format`
+        old-rxns (get-in m [::rx-matcher id :instances])]
+    (update (apply dissoc m old-rxns) ::rx-matcher assoc id rx-gen)))
+
+(defn find-reaction
+  ([m id] (get m id))
+  ([m id params]
+   (if-some [cached (get m (dynamic-id id params))]
+     cached
+     (recur
+      (reify-dynamic-reaction! m id params)
+      id
+      params))))
+
+(defn compute-reaction
+  ([m id]
+   (let [rxn (get m id)]
+     (cond
+       (nil? rxn)
+       (throw
+        (ex-info (str "Reaction with id: " id " is not registered!")
+                 {:id id}))
+
+       (contains? rxn :value)
+       m
+
+       :else
+       (if-some [input-to-compute
+                 (->> (:inputs rxn)
+                      (map (partial get m))
+                      (some #(when-not (contains? % :value) %)))]
+         (-> m
+             (compute-reaction input-to-compute)
+             (compute-reaction id))
+         (if (nil? (:fn rxn))
+           (throw
+            (ex-info
+             (str "No function defined for reaction: " id "!")
+             {:reaction rxn
+              :id id}))
+           (update m id
+                   (partial run-reaction-impl m)))))))
+  ([m id params]
+   (compute-reaction (reify-dynamic-reaction! m id params) (dynamic-id id params))))
+
+(defn compute-reaction!
+  ([m id] ;; TODO: update to clear only for passed params
+   (-> m
+       (update id dissoc :value)
+       (compute-reaction id)))
+  ([m id params]
+   (-> m
+       (update [::dynamic id params] dissoc :value)
+       (compute-reaction id params))))
+
+(defn get-reaction
+  ([m id]
+   (if-let [rxn (get m id)]
+     (if (contains? rxn :value)
+       (:value rxn)
+       (do
+         (println "[WARN]" "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
+         (get-reaction (compute-reaction m id) id)))
+     (throw (ex-info (str "Reaction with id: " id " is not registered!")
+                     {:id id}))))
+  ([m id params]
+   (get-reaction (compute-reaction m id params) (dynamic-id id params))))
+
+;; TODO get-reaction with parameters!
+
+
+
+;; TODO: get-upstream
+;; TODO: get-downstream
+;; TODO: print-graph
+;; NOTE: Should we enforce `::root` as the single changeable point?
+;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
+;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
+
+
+(defn- annotate-inputs [m id inputs f] ;; TODO: does this need to change for dynamic queries?
   (reduce
    (fn [m input]
      (if (contains? m input)
@@ -138,7 +234,7 @@
    m
    inputs))
 
-(defn add-reaction!
+(defn add-reaction! ;; TODO: add description of parametrization
   ([m rx]
    (add-reaction! m (:id rx) (:args rx) (:fn rx) (dissoc rx
                                                          :id
@@ -226,7 +322,7 @@
                    (dissoc blocking (:id rxn))
                    (into ready (subvec rxns 1)))))))))
 
-(defn clear-watchers [m trigger-id]
+(defn clear-watchers [m trigger-id] ;; TODO: clear watchers based on params associated with change.
   (let [rxn (get m trigger-id)
         add-ids-by-invariant (partial reduce
                               (fn [acc id]
@@ -243,11 +339,9 @@
       (if (empty? triggered-by-order-invariant)
         m
         (let [[k triggered] (first triggered-by-order-invariant)
-              _ (println "Handling invariant: " k)
               [m sorted-triggers]
               (reduce
-               ;; NOTE: this is re-running reactions for each input that changes
-               ;;       we should wait for all inputs to resolve, and then resume.
+               ;; NOTE: we should clean up dynamic reactions which are stale somewhere.
                (fn [[m sorted-triggers] id]
                  (let [{:keys [lazy? value watchers] :as inner-rxn} (get m id)]
                    (println "Handling ID: " id "lazy? " lazy? "watchers: " (add-ids-by-invariant sorted-triggers watchers))
@@ -266,23 +360,7 @@
                            [m (add-ids-by-invariant sorted-triggers watchers)]))))))
                [m (dissoc triggered-by-order-invariant k)]
                triggered)]
-          (recur m sorted-triggers))))
-    #_
-    (reduce
-     ;; NOTE: this is re-running reactions for each input that changes
-     ;;       we should wait for all inputs to resolve, and then resume.
-     (fn [m id]
-       (let [{:keys [lazy? value watchers] :as inner-rxn} (get m id)]
-         (if lazy?
-           (-> m
-               (update id dissoc :value)
-               (clear-watchers id))
-           (let [m (compute-reaction! m id)]
-             (if (= (get-reaction m id) value)
-               m
-               (clear-watchers m id))))))
-     m
-     (:watchers rxn))))
+          (recur m sorted-triggers))))))
 
 (defn set-value
   ([m v]
@@ -303,30 +381,3 @@
 
 (defn update-value [m id f & args]
   (set-value m id (apply f (get-reaction m id) args)))
-
-(comment
-  ;; These two functions can force recomputation of all reaction fns.
-  ;; These shouldn't be enabled unless absolutely neccessary, as they may cause issues with eagerly computed reactions
-  (defn transitive-inputs [m id]
-    (loop [inputs #{id}
-           rxns [(get m id)]]
-      (let [new-inputs (into #{}
-                             (comp
-                              (mapcat :inputs)
-                              (remove inputs))
-                             rxns)]
-        (if (empty? new-inputs)
-          inputs
-          (recur (into inputs new-inputs) (map (partial get m) new-inputs))))))
-
-  (defn compute-reactions! [m id]
-    (-> (reduce
-         (fn [m id]
-           (update m id
-                   (fn [rxn]
-                     (if (:fn rxn)
-                       (dissoc rxn :value)
-                       rxn))))
-         m
-         (transitive-inputs m id))
-        (compute-reaction id))))
