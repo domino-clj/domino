@@ -51,10 +51,31 @@
                  :val-if-missing 1}]]
            [:collatz
             [:x {:id             :x
-                 :val-if-missing 1}]]]
+                 :val-if-missing 1}]]
+           #_
+           [:patients {:collection-id :patients
+                       :index [:mrn]}
+            [:mrn {:id :mrn
+                   :read-only? true}]
+            [:name {:id :name}]
+            [:first {:id :fname}]
+            [:last {:id :lname}]]]
 
    :constraints
-   [{:id    :a-is-valid?
+   [#_
+    {:id :stringify-name
+     :target {:patients :*}
+     :query {:f :fname
+             :l :lname
+             :n :name}
+     :pred (fn [{:keys [f l n]}]
+             (= n (str l ", " f)))
+     :resolver {:query {:f :fname
+                        :l :lname}
+                :return {:n [:patients {:mrn :*} :name]}
+                :fn (fn [{:keys [f l]}]
+                      {:n (str l ", " f)})}}
+    {:id    :a-is-valid?
      :query {:a :a}
      :pred  (fn [{:keys [a]}]
               (and (integer? a)
@@ -94,6 +115,13 @@
                 :return {:c [:a+b=c :c]}
                 :fn     (fn [{:keys [a b]}]
                           {:c (+ a b)})}}]})
+
+(def eg-db
+  {:collatz {:x 3}
+   :a+b=c {:a 1 :c 0}
+   :patients [{:mrn 0}
+              {:mrn 1
+               :name "Foo"}]})
 
 (defn get-db [ctx]
   (-> ctx ::rx ::db :value))
