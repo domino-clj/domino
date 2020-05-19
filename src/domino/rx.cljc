@@ -11,6 +11,45 @@
 ;;
 ;; ==============================================================================
 
+;; TODO: Enforce reaction shape to allow pattern matching for various operations!
+;; Example 1.
+;; Every patient has correlated imperial and metric heights, and is looked up by id.
+#_{:patients [{:id 1 :name "One" :height {:cm 180 :in 70.87}} {:id 2 :name "Two" :height {:cm 160 :in 62.99}}]}
+#_{::root
+   {:value
+    {:patients
+     [{:id 1 :name "One" :height {:cm 180 :in 70.87}}
+      {:id 2 :name "Two" :height {:cm 160 :in 62.99}}]}}
+   {:type :path
+    :static? true
+    :path [:patients]
+    :id :patients-literal}
+   {:args ::root
+    :fn (fn [db]
+          (:patients db []))
+    :value [{:id 1 :and :body} {:id 2 :and :body}]}
+
+   ;; Some generated reaction for the indexes in patients
+   {:type :indexes
+    :collection :patients-literal
+    :id :patients-indexes}
+   {:args :patients-literal
+    :args-format :single
+    :fn (fn [patients]
+          (map #(select-keys % [:id]) patients))
+    :value '({:id 1} {:id 2})}
+   ;; May want to add some generated constraint for uniqueness of indexes in patients
+
+   ;; This is where it gets hard...
+
+   ;; Now, we need a parametrized lookup
+   {:type :path
+    :static? false
+    :parameters {:patient-id :p-id}
+    :pattern [:patients {:id :patient-id}]}
+   {... ?}}
+
+
 ;; NOTE: may want to refactor to allow optional params to a reaction (e.g. lookup)
 ;; NOTE: may want to look at reitit's approach of composing matchers or something?
 ;; TODO: Create example use case from domino.core for a collection, then
