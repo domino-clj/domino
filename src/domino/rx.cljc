@@ -87,10 +87,7 @@
                            (assoc m i (input->value i)))
                          {}
                          (:args rxn))])
-        compute (comp (fn [r] (println "[DEBUG]" "Computing reaction:")
-                        (clojure.pprint/pprint r)
-                        r)
-                      (:fn rxn))]
+        compute (:fn rxn)]
     (assoc
      rxn
      :value
@@ -240,9 +237,7 @@
    (if-let [rxn (get m id)]
      (if (contains? rxn :value)
        (:value rxn)
-       (do
-         (println "[WARN]" "Value isn't computed. Run compute-reaction to update your reactive map and cache the computation!")
-         (get-reaction (compute-reaction m id) id)))
+       (get-reaction (compute-reaction m id) id))
      (throw (ex-info (str "Reaction with id: " id " is not registered!")
                      {:id id}))))
   ([m id params]
@@ -326,7 +321,6 @@
            blocked {}
            blocking {}
            [rxn :as rxns] reactions]
-      (println "[DEBUG]" "attempting to add: " (:id rxn))
       (if (empty? rxns)
         (if (empty? blocked)
           m
@@ -338,16 +332,14 @@
                           (remove
                            (partial contains? m)
                            (get-inputs m rxn))))]
-          (do
-            (println "[DEBUG]" "BLOCKED BY: " blocks)
-            (recur m
-                   (assoc blocked rxn blocks)
-                   (reduce
-                    (fn [acc in]
-                      (update acc in (fnil conj #{}) rxn))
-                    blocking
-                    blocks)
-                   (subvec rxns 1)))
+          (recur m
+                 (assoc blocked rxn blocks)
+                 (reduce
+                  (fn [acc in]
+                    (update acc in (fnil conj #{}) rxn))
+                  blocking
+                  blocks)
+                 (subvec rxns 1))
           (let [unblock (get blocking (:id rxn))
                 [ready blocked] (reduce
                                  (fn [[racc bacc] r]
@@ -373,8 +365,6 @@
                                         id)))]
     (loop [m m
            triggered-by-order-invariant (add-ids-by-invariant (sorted-map) (:watchers rxn))]
-      (println "ID: " trigger-id)
-      (println "TRIGGERED: " triggered-by-order-invariant)
       (if (empty? triggered-by-order-invariant)
         m
         (let [[k triggered] (first triggered-by-order-invariant)
@@ -383,20 +373,14 @@
                ;; NOTE: we should clean up dynamic reactions which are stale somewhere.
                (fn [[m sorted-triggers] id]
                  (let [{:keys [lazy? value watchers] :as inner-rxn} (get m id)]
-                   (println "Handling ID: " id "lazy? " lazy? "watchers: " (add-ids-by-invariant sorted-triggers watchers))
                    (if lazy?
                      [(-> m
                           (update id dissoc :value))
                       (add-ids-by-invariant sorted-triggers watchers)]
                      (let [m (compute-reaction! m id)]
                        (if (= (get-reaction m id) value)
-                         (do
-                           (println "ID:" id " unchanged.")
-                           [m sorted-triggers])
-                         (do
-                           (println "ID: " id "was changed!")
-                           (println "Value of ID:" id "\n" value "\n->\n" (get-reaction m id))
-                           [m (add-ids-by-invariant sorted-triggers watchers)]))))))
+                         [m sorted-triggers]
+                         [m (add-ids-by-invariant sorted-triggers watchers)])))))
                [m (dissoc triggered-by-order-invariant k)]
                triggered)]
           (recur m sorted-triggers))))))
