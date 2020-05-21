@@ -845,6 +845,12 @@
        [:length {:id :shift-length}]]]
      :events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
                :outputs [[:patient :medication :unit]]}]})
+
+;; ==============================================================================
+;; TODO
+;; - Prevent empty subcontexts from generating a map.
+
+
 (comment
 
 
