@@ -263,9 +263,12 @@
                         [::subcontexts id ::elements idx?]
                         [::subcontexts id])
                       new-child-ctx)
-            (update ::db assoc-in (cond-> (compute-path ctx id)
-                                    collection? (conj idx?))
-                    child-v)
+            (update ::db #(let [p (cond-> (compute-path ctx id)
+                                    collection? (conj idx?))]
+                            (if (empty? child-v)
+                              (dissoc-in % p)
+                              (assoc-in % p
+                                        child-v))))
             (update ::child-tx-reports
                     (fnil assoc {}) subctx-id tx))))
 
@@ -695,13 +698,17 @@
                                          (get-in db path))}
                             (initialize schema (get-in db path))))))]
     (if schema
-      (update ctx' ::db assoc-in path (if collection?
-                                        (into {}
-                                              (map
-                                               (fn [[k el]]
-                                                 [k (::db el)])
-                                               (get-in ctx' [::subcontexts id ::elements])))
-                                        (get-in ctx' [::subcontexts id ::db])))
+      (update ctx' ::db (fn [m p v]
+                          (if (empty? v)
+                            (dissoc-in m p)
+                            (assoc-in m p v)))
+              path (if collection?
+                     (into {}
+                           (map
+                            (fn [[k el]]
+                              [k (::db el)])
+                            (get-in ctx' [::subcontexts id ::elements])))
+                     (get-in ctx' [::subcontexts id ::db])))
       ctx')))
 
 (defn initialize
@@ -720,7 +727,23 @@
                                                       (parse-reactions schema)))
                  (update ::rx add-conflicts-rx!)
                  (transact []))]
-     (transact ctx []))))
+     ctx)))
+
+(def full-name-constraint
+  {:id :compute-full-name
+   :query {:f :given-name
+           :l :surname
+           :n :full-name}
+   :return {:n :full-name}
+   :pred (fn [{:keys [f l n]}]
+           (= (if (or (empty? f) (empty? l))
+                (or (not-empty f) (not-empty l))
+                (str l ", " f))
+              n))
+   :resolver (fn [{:keys [f l n]}]
+               {:n (if (or (empty? f) (empty? l))
+                     (or (not-empty f) (not-empty l))
+                     (str l ", " f))})})
 
 (def example-schema-trivial
   "
@@ -743,15 +766,7 @@
              [:first {:id :given-name}]
              [:last  {:id :surname}]
              [:full {:id :full-name}]]]]
-   :constraints [{:id :compute-full-name
-                  :query {:f :given-name
-                          :l :surname
-                          :n :full-name}
-                  :return {:n :full-name}
-                  :pred (fn [{:keys [f l n]}]
-                          (= (str l ", " f) n))
-                  :resolver (fn [{:keys [f l n]}]
-                              {:n (str l ", " f)})}]})
+   :constraints [full-name-constraint]})
 
 
 (def example-schema-nested
@@ -784,6 +799,7 @@
              [:stay
               [:start {:id :start}]
               [:end   {:id :end}]]
+             [:label {:id :label}]
              [:patient {:id :patient
                         :schema
                         {:model
@@ -792,15 +808,16 @@
                            [:first {:id :given-name}]
                            [:last {:id :surname}]
                            [:full {:id :full-name}]]]
-                         :constraints [{:id :compute-full-name
-                                        :query {:f :given-name
-                                                :l :surname
-                                                :n :full-name}
-                                        :return {:n :full-name}
-                                        :pred (fn [{:keys [f l n]}]
-                                                (= (str l ", " f) n))
-                                        :resolver (fn [{:keys [f l n]}]
-                                                    {:n (str l ", " f)})}]}}]]})
+                         :constraints [full-name-constraint]}}]]
+     :constraints [{:id :compute-label
+                    :query {:n [:patient :full-name]
+                            :b :bed-id
+                            :l :label}
+                    :return {:l :label}
+                    :pred (fn [{:keys [n b l]}]
+                            (= l (str b " Occupied by " n)))
+                    :resolver (fn [{:keys [n b l]}]
+                                {:l (str b " Occupied by " n)})}]})
 
 (def example-schema-1
     ""
@@ -811,15 +828,7 @@
         :order-by [:surname :given-name :mrn]
         :collection? true
         :schema
-        {:constraints [{:id :compute-full-name
-                        :query {:f :given-name
-                                :l :surname
-                                :n :full-name}
-                        :return {:n :full-name}
-                        :pred (fn [{:keys [f l n]}]
-                                (= (str l ", " f) n))
-                        :resolver (fn [{:keys [f l n]}]
-                                    {:n (str l ", " f)})}]
+        {:constraints [full-name-constraint]
          :model
          [[:mrn {:id :mrn}]
           [:name
@@ -848,7 +857,17 @@
 
 ;; ==============================================================================
 ;; TODO
-;; - Prevent empty subcontexts from generating a map.
+;; - DONE Prevent empty subcontexts from generating a map.
+;; - TODO Support cross-context paths for non-collection subcontexts
+;; - Reference old version from events possibly
+;; - Add relatedness fns
+;; - Add event-style rules
+;; - Add computation/derivation-style rules
+;; - Add intermediate-value rules
+;; - Ensure as much feature parity as possible
+;; - Establish future enhancment paths (i.e. cross-context rules)
+;; - Connect/rewrite tests as neccessary
+;; - Tidy namespaces and add/update documentation
 
 
 (comment
