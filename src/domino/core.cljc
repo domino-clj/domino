@@ -451,7 +451,7 @@
         [])
        (group-changes ctx)))
 
-(defn get-child-tx-reports [ctx]
+(defn include-child-tx-reports [ctx]
   (if-some [children (::child-tx-reports ctx)]
     (-> ctx
         (update ::transaction-report assoc ::children children)
@@ -465,8 +465,8 @@
     (try
       (-> ctx
           (resolve-changes-impl parsed-changes)
-          (assoc ::transaction-report {:status :complete})
-          (get-child-tx-reports)
+          (update ::transaction-report (fnil assoc {}) :status :complete)
+          (include-child-tx-reports)
           (update-in
            [::transaction-report :changes]
            (fnil into [])
@@ -485,7 +485,7 @@
 
 (defn transact
   ([ctx changes]
-   (transact ctx ctx changes))
+   (transact ctx (dissoc ctx ::transaction-report) changes))
   ([ctx-pre {state ::rx :as ctx} changes]
    (let [append-db-hash! (fn [ctx]
                            (let [hashes (::db-hashes ctx #{})
@@ -515,7 +515,7 @@
                          {:unresolvable unresolvable
                           :conflicts conflicts}))
 
-         ;; TODO: aggregate compatible changes from resolvers, or otherwise synthesize a changeset from a group of resolvers.
+         ;; TODO: Ensure that resolvers can operate in parallel
          (not-empty resolvers)
          (let [resolver-ids (vals resolvers)
                {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
@@ -765,7 +765,10 @@
             [:name
              [:first {:id :given-name}]
              [:last  {:id :surname}]
-             [:full {:id :full-name}]]]]
+             [:full {:id :full-name}]]
+            [:height {:id :h}]
+            [:weight {:id :w}]
+            [:bmi    {:id :bmi}]]]
    :constraints [full-name-constraint]})
 
 
@@ -854,6 +857,20 @@
        [:length {:id :shift-length}]]]
      :events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
                :outputs [[:patient :medication :unit]]}]})
+
+;; EXAMPLE EVENT ALGORITHM
+(defn handle-events [ctx changeset]
+  (let [change-ids (into #{} (map first changeset))
+        events (filter #(some
+                         (partial contains? change-ids)
+                         (:inputs %))
+                       (:events ctx))]
+    ;; TODO: Consider events with multiple outputs!
+    ;;       Consider events with overlapping inputs outputs!
+    ;; For each changeset, compile a list of events, ordered as they appear in the schema, or as designated by some sort key
+    ;; For each event, skip it if it's been run (with the current args?), or if it would change a value that has already been set, otherwise append it's result to the change queue.
+    ;; repeat for next set in queue until queue is exhausted.
+    ))
 
 ;; ==============================================================================
 ;; TODO
@@ -1380,15 +1397,14 @@
 ;; ==============================================================================
 
 #?(:clj
-   (comment
-     (defmacro event [[_ in out :as args] & body]
-       (let [in-ks#  (mapv keyword (:keys in))
-             out-ks# (mapv keyword (:keys out))]
-         {:inputs  in-ks#
-          :outputs out-ks#
-          :handler `(fn ~(vec args) ~@body)}))))
-#_
-(defn transact
+   (defmacro event [[_ in out :as args] & body]
+     (let [in-ks#  (mapv keyword (:keys in))
+           out-ks# (mapv keyword (:keys out))]
+       {:inputs  in-ks#
+        :outputs out-ks#
+        :handler `(fn ~(vec args) ~@body)})))
+
+(defn transact-old
   "Take the context and the changes which are an ordered collection of changes
 
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
@@ -1396,13 +1412,13 @@
   (let [updated-ctx (events/execute-events ctx changes)]
     (effects/execute-effects! updated-ctx)
     updated-ctx))
-#_
-(defn initial-transaction
+
+(defn initial-transaction-old
   "If initial-db is not empty, transact with initial db as changes"
   [{::keys [model] :as ctx} initial-db]
   (if (empty? initial-db)
     ctx
-    (transact ctx
+    (transact-old ctx
               (reduce
                 (fn [inputs [_ path]]
                   (if-some [v (get-in initial-db path)]
@@ -1410,8 +1426,8 @@
                     inputs))
                 []
                 (:id->path model)))))
-#_
-(defn initialize
+
+(defn initialize-old
   "Takes a schema of :model, :events, and :effects
 
   1. Parse the model
@@ -1426,7 +1442,7 @@
     ::state => the state of actual working data
     "
   ([schema]
-   (initialize schema {}))
+   (initialize-old schema {}))
   ([{:keys [model effects events] :as schema} initial-db]
    ;; Validate schema
    (validation/maybe-throw-exception (validation/validate-schema schema))
@@ -1434,7 +1450,7 @@
    (let [model  (model/model->paths model)
          ;; TODO: Generate trivial events for all paths with `:pre` or `:post` and no event associated.
          events (model/connect-events model events)]
-     (initial-transaction
+     (initial-transaction-old
        {::model         model
         ::events        events
         ::events-by-id  (util/map-by-id events)
@@ -1443,10 +1459,10 @@
         ::db            initial-db
         ::graph         (graph/gen-ev-graph events)}
        initial-db))))
-#_
-(defn trigger-effects
+
+(defn trigger-effects-old
   "Triggers effects by ids as opposed to data changes
 
   Accepts the context, and a collection of effect ids"
   [ctx effect-ids]
-  (transact ctx (effects/effect-outputs-as-changes ctx effect-ids)))
+  (transact-old ctx (effects/effect-outputs-as-changes ctx effect-ids)))

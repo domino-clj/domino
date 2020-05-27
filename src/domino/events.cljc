@@ -36,7 +36,7 @@
      (catch #?(:clj Exception :cljs js/Error) e
        (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e))))))
 
-(defn update-ctx [ctx model old-outputs new-outputs]
+(defn apply-result-to-ctx [ctx model old-outputs new-outputs]
   (reduce-kv
     (fn [ctx id new-value]
       ;;todo validate that the id matches an ide declared in outputs
@@ -67,8 +67,8 @@
        (if async?
          (try-event event ctx db old-outputs
                     (fn [new-outputs]
-                      (update-ctx ctx model old-outputs new-outputs)))
-         (update-ctx ctx model old-outputs (try-event event ctx db old-outputs)))))
+                      (apply-result-to-ctx ctx model old-outputs new-outputs)))
+         (apply-result-to-ctx ctx model old-outputs (try-event event ctx db old-outputs)))))
    ctx
    edges))
 
