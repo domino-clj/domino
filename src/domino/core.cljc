@@ -858,19 +858,27 @@
      :events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
                :outputs [[:patient :medication :unit]]}]})
 
-;; EXAMPLE EVENT ALGORITHM
-(defn handle-events [ctx changeset]
-  (let [change-ids (into #{} (map first changeset))
-        events (filter #(some
-                         (partial contains? change-ids)
-                         (:inputs %))
-                       (:events ctx))]
-    ;; TODO: Consider events with multiple outputs!
-    ;;       Consider events with overlapping inputs outputs!
-    ;; For each changeset, compile a list of events, ordered as they appear in the schema, or as designated by some sort key
-    ;; For each event, skip it if it's been run (with the current args?), or if it would change a value that has already been set, otherwise append it's result to the change queue.
-    ;; repeat for next set in queue until queue is exhausted.
-    ))
+;; EVENTS
+
+
+;; General process
+;; 1. Aggregate all things which changed in rx-map
+;; 2. Based on changed things, find all triggered events
+;; 3. Place events into a queue
+;; 4. Take an event off of the queue, and compute it's resulting changeset
+;; 5. Place any events triggered onto the queue (at the end)
+;; 6. Repeat until event queue is consumed
+
+;; Notes
+;; - Configure event-specific behaviours (e.g. how many times in a tx can it be triggered?)
+;; - Allow for rxns to non-db values (e.g. db-pre, ctx, etc...)
+;; - Allow for writes to an ephemeral db for intermediate values
+
+;; RELATIONSHIPS
+
+;; - Aggregate relatedness from constraints and events at compile time
+;; - Consider tracking metadata about 'why' things are related, if only for debugging
+;; - Consider future ability to draw graph of relationships
 
 ;; ==============================================================================
 ;; TODO
