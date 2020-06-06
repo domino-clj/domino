@@ -14,3 +14,12 @@
        (filter #(contains? % :id))
        (map (juxt :id identity))
        (into {})))
+
+(defn dissoc-in [m [k & ks]]
+  (if-some [submap (and ks
+                        (some-> m
+                                (get k)
+                                (dissoc-in ks)
+                                (not-empty)))]
+    (assoc m k submap)
+    (dissoc m k)))
