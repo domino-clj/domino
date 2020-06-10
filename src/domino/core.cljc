@@ -280,7 +280,7 @@
                                                                     :reason ::invalid-change
                                                                     :data   data}))
                                   (throw ex))))))
-    (catch #?(:clj Exception :cljs js/Error) e
+    (catch #?(:clj Exception :cljs js/Error) ex
       (let [data (ex-data ex)]
         (post-cb
          (assoc ctx ::transaction-report {:status :failed
@@ -294,6 +294,7 @@
   ([{db-pre ::db :as ctx-pre} user-changes cb]
    (letfn [(rollback!
              [ctx]
+             (println "ROLLING BACK!")
              (-> ctx-pre
                  (dissoc ::db-hashes
                          ::event-queue)
@@ -301,6 +302,7 @@
                  cb))
            (append-db-hash!
              [ctx]
+             (println "APPENDING DB HASH")
              (let [hashes (::db-hashes ctx #{})
                    h (hash (get-db ctx))]
                (if (hashes h)
@@ -311,6 +313,7 @@
                  (update ctx ::db-hashes (fnil conj #{}) h))))
            (get-triggered-events
              [{state ::rx  events ::events :as ctx}]
+             (println "GETTING TRIGGERED EVENTS")
              (->> (rx/get-reaction state ::events)
                   (remove
                    (fn [ev]
@@ -319,14 +322,17 @@
                   not-empty))
            (append-events-to-queue
              [ctx]
-             (update ctx ::event-queue
-                     (fnil (partial reduce conj) events/empty-queue)
-                     (get-triggered-events ctx)))
+             (println "APPENDING EVENTS TO QUEUE")
+             (let [triggered (get-triggered-events ctx)]
+               (update ctx ::event-queue
+                       (fnil (partial reduce conj) events/empty-queue)
+                       triggered)))
            (handle-changes!
              [ctx changes post-cb]
              (println "Handling changes..." changes)
              (resolve-changes ctx changes
                               (fn [{::keys [db transaction-report] :as ctx'}]
+                                (println "Resolve Changes Callback!")
                                 (if (= :failed (:status transaction-report))
                                   (rollback! ctx')
                                   (try
@@ -347,12 +353,24 @@
                                                                                      :reason ::unknown-error
                                                                                      :data (ex-data ex)})))))))))
            (post-tx
-             [ctx]
+             [{::keys [rx transaction-report] :as ctx}]
              (println "Post-tx...")
-             (cb
-              (dissoc ctx
-                      ::db-hashes
-                      ::event-queue)))
+             (let [fxs (if (= :complete (:status transaction-report))
+                         (rx/get-reaction rx ::effects)
+                         [])]
+               (doseq [fx fxs
+                       :let
+                       [run-fx! (rx/get-reaction rx fx)]]
+                 (println "Effect: " fx)
+                 ;; Evaluate each effect fn
+                 (when (fn? run-fx!) (run-fx!)))
+               (cb
+                (-> ctx
+                    (dissoc
+                     ::db-hashes
+                     ::event-queue)
+                    (assoc
+                     ::triggered-effects fxs)))))
            (tx-step
              [ctx changes]
              (println "tx-step..." changes)
@@ -363,6 +381,8 @@
                     ev-q  ::event-queue
                     tx-report ::transaction-report
                     :as ctx}]
+                (println "Handle Changes! Callback")
+                (clojure.pprint/pprint db)
                 (let [;; 2. Identify any conflicts that have arisen.
                       {::keys [unresolvable resolvers]
                        :as conflicts}
@@ -379,9 +399,13 @@
                       (post-tx ctx))
 
                     (not-empty unresolvable)
-                    (throw (ex-info "Unresolvable constraint conflicts exist!"
-                                    {:unresolvable unresolvable
-                                     :conflicts conflicts}))
+                    (rollback! (assoc ctx
+                                      ::transaction-report
+                                      {:status :failed
+                                       :reason ::unresolvable-constraint
+                                       :data
+                                       {:unresolvable unresolvable
+                                        :conflicts conflicts}}))
 
                     ;; TODO: Ensure that resolvers can operate in parallel
                     (not-empty resolvers)
@@ -392,39 +416,47 @@
                       (tx-step ctx changes))
 
                     (not-empty conflicts)
-                    (throw (ex-info "Unexpected key on :domino/conflicts. Expected :domino.core/resolvers, :domino.core/passed, and/or :domino.core/unresolvable."
-                                    {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
-                                     :conflicts conflicts
-                                     :reaction-definition (get state ::conflicts)}))
+                    (rollback! (assoc ctx ::transaction-report
+                                      {:status :failed
+                                       :reason ::invalid-conflicts
+                                       :data {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
+                                              :conflicts conflicts
+                                              :reaction-definition (get state ::conflicts)}}))
 
                     :else
                     (letfn [(trigger-event [q c]
+                              (println "Triggering: " c)
                               (tx-step (-> ctx
                                            (assoc ::event-queue (pop q))
                                            (update ::event-history (fnil conj []) (peek q)))
                                        [c]))
-                            (run-next-event [q]
+                            ;; Pass state rx-map to allow use of `compute-reaction` for caching
+                            (run-next-event [state q]
+                              (println "Run Next Event: " q)
                               (if (empty? q)
                                 (do
-                                  (println "Remaining events were nil." (keys ctx))
+                                  (println "Remaining events were nil.")
                                   (post-tx ctx))
-                                (let [c (rx/get-reaction state (peek q))]
+                                (let [ev-id (peek q)
+                                      state (rx/compute-reaction state ev-id)
+                                      c (rx/get-reaction state ev-id)]
+                                  (println "Got event: " (peek q) "Val: " c)
                                   (cond
                                     (nil? c)
-                                    (recur (pop q))
+                                    (recur state (pop q))
                                     (fn? c)
                                     (do
                                       (c (fn [r]
                                            (println "Async event: " (peek q) " gave result: " r)
                                            (if (nil? r)
-                                             (run-next-event (pop q))
+                                             (run-next-event state (pop q))
                                              (trigger-event q r)))))
                                     :else
                                     (trigger-event q c)))))]
-                      (run-next-event ev-q)))))))]
+                      (run-next-event state ev-q)))))))]
      (println "Transacting...")
      (tx-step (-> ctx-pre
-                  (dissoc ::transaction-report ::db-hashes)           ;; Clear tx-report and db-hashes
+                  (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
                   (update ::rx rx/update-root assoc ::db-pre db-pre)) ;; Add db-pre for event triggering
               user-changes))))                                        ;; Start tx with user driven changes.
 
@@ -502,6 +534,8 @@
                  :args-format :map
                  :lazy? true
                  :args (:query constraint)
+                 ::upstream (rx/args->inputs :map (:query constraint))
+                 ::downstream (vals (:return constraint))
                  :fn (comp
                       (fn [result]
                         (reduce-kv
@@ -603,6 +637,9 @@
                          :fn identity})
       (rx/add-reaction! {:id id
                          ::is-event? true
+                         ::upstream (->> inputs
+                                         (remove (set ignore-changes)))
+                         ::downstream outputs
                          :lazy? true
                          :args {:ctx-args [::ctx-args id]
                                 :inputs [::inputs id]
@@ -614,13 +651,13 @@
                          (letfn [(process-result [r o]
                                    (reduce-kv
                                     (fn [acc k v]
-                                      (if (not= (get r k) v)
+                                      (if (not= (get r k v) v)
                                         (assoc acc k (get r k))
                                         acc))
                                     nil
                                     o))]
                            (fn [a]
-                             (when (and should-run (should-run a))
+                             (when (or (not (ifn? should-run)) (should-run a))
                                (if async?
                                  (fn [cb]
                                    (handler
@@ -641,6 +678,70 @@
                       :fn (fn [& evs]
                             (not-empty
                              (filter some? evs)))})))
+
+(defn add-outgoing-effect-to-state! [state {:keys [id inputs handler] :as effect}]
+  (-> state
+      (rx/add-reaction! {:id [::inputs id]
+                         :args inputs
+                         :args-format :rx-map
+                         :fn identity})
+      (rx/add-reaction! {:id [::trigger? id]
+                         :args (->> inputs
+                                    (mapv (partial conj [::changed?])))
+                         :args-format :vector
+                         :fn #(when (some true? %&)
+                                id)})
+      (rx/add-reaction! {:id id
+                         ::is-effect? true
+                         :lazy? true
+                         :args {:inputs [::inputs id]}
+                         :args-format :map
+                         :fn
+                         (fn [{:keys [inputs]}]
+                           (fn []
+                             (handler {:inputs inputs})))})))
+
+(defn add-incoming-effect-to-state! [state {:keys [id outputs handler] :as effect}]
+  (-> state
+      (rx/add-reaction! {:id [::outputs id]
+                         :args outputs
+                         :args-format :rx-map
+                         :fn identity})
+      (rx/add-reaction! {:id id
+                         ::is-effect? true
+                         :lazy? true
+                         :args {:outputs [::outputs id]}
+                         :args-format :map
+                         :fn
+                         (fn [a]
+                           (fn [args]
+                             (let [r (handler (assoc a :args args))]
+                               (reduce-kv
+                                (fn [acc k v]
+                                  (if (not= (get r k v) v)
+                                    (assoc acc k (get r k))
+                                    acc))
+                                nil
+                                (:outputs a)))))})))
+
+(defn add-effect-rxns! [state effects]
+  (let [incoming-effects (filter #(seq (:outputs %)) effects)
+        outgoing-effects (filter #(seq (:inputs %)) effects)]
+    (println incoming-effects)
+    (rx/add-reaction!
+     (reduce
+      add-incoming-effect-to-state!
+      (reduce
+       add-outgoing-effect-to-state!
+       state
+       outgoing-effects)
+      incoming-effects)
+     {:id ::effects
+      :args-format :vector
+      :args (mapv #(conj [::trigger?] (:id %)) outgoing-effects)
+      :fn (fn [& fx]
+            (not-empty
+             (filter some? fx)))})))
 
 
 (declare initialize)
@@ -720,6 +821,49 @@
         :else
         (recur ctx (rest fields) on-complete)))))
 
+(defn deep-relationships [rel-map]
+  (letfn [(add-relationship [m src ds]
+            (reduce-kv
+             (fn [acc k v]
+               (assoc acc k
+                      (if (contains? v src)
+                        (into v ds)
+                        v)))
+             {}
+             m))]
+    (reduce-kv
+     add-relationship
+     rel-map
+     rel-map)))
+
+(defn compute-relationships [{::keys [rx] :as ctx}]
+  (let [ctx'
+        (reduce
+         (fn [ctx {::keys [upstream downstream]}]
+           (-> ctx
+               (update ::downstream
+                       (fn [rel]
+                         (reduce
+                          (fn [rel' up]
+                            (update rel' up (fnil into #{}) downstream))
+                          (or rel {})
+                          upstream)))
+               (update ::upstream
+                       (fn [rel]
+                         (reduce
+                          (fn [rel' down]
+                            (update rel' down (fnil into #{}) upstream))
+                          (or rel {})
+                          downstream)))))
+         ctx
+         (filter
+          #(and (seq (::upstream %)) (seq (::downstream %)))
+          (vals rx)))]
+    (assoc
+     ctx'
+     ::upstream-deep (deep-relationships (::upstream ctx'))
+     ::downstream-deep (deep-relationships (::downstream ctx')))))
+
 (defn initialize
   ([schema cb]
    (println "Defaulting to empty DB...")
@@ -741,10 +885,30 @@
                                                    (parse-reactions schema)))
               (update ::rx add-conflicts-rx!)
               (update ::rx add-event-rxns! (:events schema []))
+              (update ::rx add-effect-rxns! (:effects schema []))
+              (compute-relationships)
               (transact [] cb)))))
      (catch #?(:clj Throwable
                :cljs js/Error) e
        (println e)))))
+
+(defn trigger-effects
+  [ctx triggers cb]
+  (transact ctx (reduce
+                 (fn [changes [id args]]
+                   (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
+                     (do
+                       (println fx-fn)
+                       (println id)
+                       (println args)
+                       (println (fx-fn args))
+                       (conj
+                        changes
+                        (fx-fn args)))
+                     changes))
+                 []
+                 triggers)
+            cb))
 
 (def full-name-constraint
   {:id :compute-full-name
@@ -782,26 +946,64 @@
             [:first {:id :given-name}]
             [:last  {:id :surname}]
             [:full {:id :full-name}]]
-           [:height {:id :h :val-if-missing 0}]
-           [:weight {:id :w :val-if-missing 0}]
+           [:height
+            [:metres {:id :h :val-if-missing 0}]
+            [:inches {:id :h-in :val-if-missing 0}]]
+           [:weight
+            [:kilograms {:id :w :val-if-missing 0}]
+            [:pounds    {:id :w-lb :val-if-missing 0}]]
            [:bmi    {:id :bmi}]
            [:async
             [:in {:id :in}]
             [:out {:id :out}]
             [:ms {:id :ms :val-if-missing 1000}]]]
    :constraints [full-name-constraint]
-   :events [{:id :event/bmi
+   :events [{:id :event/convert-w
+             :inputs [:w]
+             :outputs [:w-lb]
+             :handler
+             (fn [{{:keys [w]} :inputs
+                   {:keys [w-lb]} :outputs}]
+               (when-not (< -0.01 (- (* w 2.2) w-lb) 0.01)
+                 {:w-lb
+                  (* w 2.2)}))}
+            {:id :event/convert-w-lb
+             :inputs [:w-lb]
+             :outputs [:w]
+             :handler
+             (fn [{{:keys [w-lb]} :inputs
+                   {:keys [w]}    :outputs}]
+               (when-not (< -0.01 (- (* w 2.2) w-lb) 0.01)
+                 {:w (/ w-lb 2.2)}))}
+            {:id :event/convert-h
+             :inputs [:h]
+             :outputs [:h-in]
+             :handler
+             (fn [{{:keys [h]} :inputs
+                   {:keys [h-in]} :outputs}]
+               (when-not (< -0.01 (- (* h-in 0.0254) h) 0.01)
+                   {:h-in (/ h 0.0254)}))}
+            {:id :event/convert-h-in
+             :inputs [:h-in]
+             :outputs [:h]
+             :handler
+             (fn [{{:keys [h-in]} :inputs
+                   {:keys [h]} :outputs}]
+               (when-not (< -0.01 (- (* h-in 0.0254) h) 0.01)
+                 {:h (* h-in 0.0254)}))}
+            {:id :event/bmi
              :inputs [:h :w]
              :outputs [:bmi]
              :handler (fn [{{:keys [h w]} :inputs}]
                         (if (= 0 h)
                           {:bmi nil}
-                          {:bmi (/ w (* h 100 h 100))}))}
+                          {:bmi (/ w h h)}))}
             {:id :event/w
              :inputs [:h :bmi]
+             :ignore-changes [:h]
              :outputs [:w]
              :handler (fn [{{:keys [h bmi]} :inputs}]
-                        {:w (* bmi h 100 h 100)})}
+                        {:w (* bmi h h)})}
             {:id :event/set-out
              :inputs [:in :ms]
              :ignore-changes [:ms]
@@ -816,7 +1018,24 @@
                            :cljs
                            (js/setTimeout
                             #(cb {:out in})
-                            ms)))}]})
+                            ms)))}]
+   :effects
+   [{:id :fx/print-bmi
+     :inputs [:bmi]
+     :handler (fn [{{:keys [bmi]} :inputs}]
+                (println "\n\n\n\n\nBMI:")
+                (println bmi)
+                (println "\n\n\n\n\n"))}
+    {:id :fx/set-patient
+     :outputs [:given-name :surname :h :w :in :ms]
+     :handler (fn [{{:keys [f l h w in ms] :as args} :args}]
+                (println args)
+                {:given-name (or f "John")
+                 :surname (or l "Doe")
+                 :h (or h 1.85)
+                 :w (or w 200)
+                 :in (or in 40)
+                 :ms (or ms 500)})}]})
 
 
 (def example-schema-nested
