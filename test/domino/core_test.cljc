@@ -12,44 +12,56 @@
 
 (defn init-ctx [state]
   (atom
-    (core/initialize {:model   [[:user {:id :user}
-                                 [:first-name {:id :fname}]
-                                 [:last-name {:id :lname}]
-                                 [:full-name {:id :full-name}]]
-                                [:user-hex {:id :user-hex}]]
+   (core/initialize
+    {:model   [[:user {:id :user}
+                [:first-name {:id :fname}]
+                [:last-name {:id :lname}]
+                [:full-name {:id :full-name}]]
+               [:user-hex {:id :user-hex}]]
 
-                      :effects [{:inputs  [:fname :lname :full-name]
-                                 :handler (fn [_ {:keys [fname lname full-name]}]
-                                            (swap! state assoc
-                                                   :first-name fname
-                                                   :last-name lname
-                                                   :full-name full-name))}
-                                {:inputs  [:user-hex]
-                                 :handler (fn [_ {:keys [user-hex]}]
-                                            (swap! state assoc :user-hex user-hex))}]
+     :effects [{:inputs  [:fname :lname :full-name]
+                :handler (fn [{{:keys [fname lname full-name]} :inputs}]
+                           (swap! state assoc
+                                  :first-name fname
+                                  :last-name lname
+                                  :full-name full-name))}
+               {:inputs  [:user-hex]
+                :handler (fn [{{:keys [user-hex]} :inputs}]
+                           (swap! state assoc :user-hex user-hex))}]
 
-                      :events  [{:inputs  [:fname :lname]
-                                 :outputs [:full-name]
-                                 :handler (fn [_ {:keys [fname lname]} _]
-                                            {:full-name (or (when (and fname lname) (str lname ", " fname))
-                                                            fname
-                                                            lname)})}
-                                {:inputs  [:user]
-                                 :outputs [:user-hex]
-                                 :handler (fn [_ {{:keys [first-name last-name full-name]
-                                                   :or   {first-name "" last-name "" full-name ""}} :user} _]
-                                            {:user-hex (->> (str first-name last-name full-name)
-                                                            (map ->hex)
-                                                            (apply str))})}]}
-                     {})))
+     :events  [{:inputs  [:fname :lname]
+                :outputs [:full-name]
+                :handler (fn [{{:keys [fname lname]} :inputs}]
+                           {:full-name (or
+                                        (when (and fname lname)
+                                          (str lname ", " fname))
+                                        fname
+                                        lname)})}
+               {:inputs  [:user]
+                :outputs [:user-hex]
+                :handler (fn [{{{:keys [first-name last-name full-name]
+                                 :or   {first-name "" last-name "" full-name ""}} :user}
+                               :inputs}]
+                           {:user-hex (->> (str first-name last-name full-name)
+                                           (map ->hex)
+                                           (apply str))})}]}
+    {})))
 
 (deftest transaction-test
   (let [external-state (atom {})
         ctx            (init-ctx external-state)]
-    (swap! ctx core/transact [[[:user :first-name] "Bob"]])
-    (is (= {:first-name "Bob" :last-name nil :full-name "Bob" :user-hex "426f62426f62"} @external-state))
-    (swap! ctx core/transact [[[:user :last-name] "Bobberton"]])
-    (is (= {:first-name "Bob" :last-name "Bobberton" :full-name "Bobberton, Bob" :user-hex "426f62426f62626572746f6e426f62626572746f6e2c20426f62"} @external-state))))
+    (swap! ctx core/transact [{:fname "Bob"}])
+    (is (= {:first-name "Bob"
+            :last-name nil
+            :full-name "Bob"
+            :user-hex "426f62426f62"}
+           @external-state))
+    (swap! ctx core/transact [{:lname "Bobberton"}])
+    (is (= {:first-name "Bob"
+            :last-name "Bobberton"
+            :full-name "Bobberton, Bob"
+            :user-hex "426f62426f62626572746f6e426f62626572746f6e2c20426f62"}
+           @external-state))))
 
 (deftest triggering-parent-test
   (let [result (atom nil)
@@ -59,30 +71,32 @@
                                            [:buz {:id :buz}]]
                                  :events  [{:inputs  [:baz]
                                             :outputs [:bar]
-                                            :handler (fn [ctx {:keys [baz]} _]
+                                            :handler (fn [{{:keys [baz]} :inputs}]
                                                        {:bar (inc baz)})}
                                            {:inputs  [:foo]
                                             :outputs [:buz]
-                                            :handler (fn [ctx {:keys [foo]} _]
+                                            :handler (fn [{{:keys [foo]} :inputs}]
                                                        {:buz (inc (:bar foo))})}]
                                  :effects [{:inputs  [:foo]
-                                            :handler (fn [ctx {:keys [foo]}]
+                                            :handler (fn [{{:keys [foo]} :inputs}]
                                                        (reset! result foo))}]})]
-    (is (= {:baz 1, :foo {:bar 2}, :buz 3} (:domino.core/db (core/transact ctx [[[:baz] 1]]))))
+    (is (= {:baz 1, :foo {:bar 2}, :buz 3}
+           (:domino.core/db (core/transact ctx [[::core/set-value :baz 1]]))))
     (is (= {:bar 2} @result))))
 
 (deftest run-events-on-init
+  ;; TODO: FIX
   (let [ctx (core/initialize {:model  [[:foo {:id :foo}
                                         [:bar {:id :bar}]]
                                        [:baz {:id :baz}]
                                        [:buz {:id :buz}]]
                               :events [{:inputs  [:baz]
                                         :outputs [:bar]
-                                        :handler (fn [ctx {:keys [baz]} _]
+                                        :handler (fn [{{:keys [baz]} :inputs}]
                                                    {:bar (inc baz)})}
                                        {:inputs  [:foo]
                                         :outputs [:buz]
-                                        :handler (fn [ctx {:keys [foo]} _]
+                                        :handler (fn [{{:keys [foo]} :inputs}]
                                                    {:buz (inc (:bar foo))})}]}
                              {:baz 1})]
     (is (= {:foo {:bar 2} :baz 1 :buz 3} (:domino.core/db ctx)))))
@@ -92,7 +106,7 @@
                                         [:m {:id :m}]]
                               :effects [{:id      :match-n
                                          :outputs [:m]
-                                         :handler (fn [_ _]
+                                         :handler (fn [_]
                                                     {:m 10})}]}
                              {:n 10 :m 0})]
     (is (= {:n 10 :m 10} (:domino.core/db (core/trigger-effects ctx [:match-n]))))))
@@ -101,7 +115,7 @@
   (let [ctx (core/initialize {:model   [[:total {:id :total}]]
                               :effects [{:id      :increment-total
                                          :outputs [:total]
-                                         :handler (fn [_ current-state]
+                                         :handler (fn [{current-state :outputs}]
                                                     (update current-state :total inc))}]}
                              {:total 0})]
     (is (= {:total 1} (:domino.core/db (core/trigger-effects ctx [:increment-total]))))))
@@ -114,17 +128,20 @@
                                         [:m {:id :m}]]
                               :effects [{:id      :match-n
                                          :outputs [:m :n]
-                                         :handler (fn [_ {:keys [n]}]
+                                         :handler (fn [{{:keys [n]} :outputs}]
                                                     {:m n})}
                                         {:id      :match-deep
                                          :outputs [:o :p]
-                                         :handler (fn [_ {:keys [p]}]
+                                         :handler (fn [{{:keys [p]} :outputs}]
                                                     {:o p})}]}
                              {:n 10 :m 0 :foo {:p 20}})]
     (is (= {:n 10 :m 10 :foo {:p 20}} (:domino.core/db (core/trigger-effects ctx [:match-n]))))
     (is (= {:n 10 :m 0 :foo {:p 20 :o 20}} (:domino.core/db (core/trigger-effects ctx [:match-deep]))))))
 
+;; TODO: Replace interceptor tests with similar use case different impl.
+
 (deftest pre-post-interceptors
+  ;; TODO: deprecated
   (let [result (atom nil)
         ctx    (core/initialize {:model   [[:foo {:id  :foo
                                                   :pre [(fn [handler]
@@ -153,6 +170,7 @@
     (is (= 3 @result))))
 
 (deftest interceptor-short-circuit
+  ;;TODO: deprecated
   (let [result (atom nil)
         ctx    (core/initialize {:model   [[:foo {:id  :foo
                                                   :pre [(fn [handler]
@@ -175,6 +193,7 @@
     (is (nil? @result))))
 
 (deftest interceptor-on-parent
+  ;;TODO: deprecated
   (let [result (atom nil)
         ctx    (core/initialize {:model   [[:foo {:id  :foo
                                                   :pre [(fn [handler]
@@ -195,12 +214,21 @@
     (is (= {:baz 1 :buz 6} (:domino.core/db (core/transact ctx [[[:baz] 1]]))))))
 
 (deftest no-key-at-path
+  ;; NOTE: this used to be self-triggering and non-convergent.
+  ;;       Add another test for non-convergent events.
   (let [ctx (core/initialize {:model  [[:foo {:id :foo}]
                                        [:bar {:id :bar}]
-                                       [:baz {:id :baz}]]
+                                       [:baz {:id :baz}]
+                                       [:a {:id :a}]]
                               :events [{:inputs  [:foo :bar]
-                                        :outputs [:baz]
-                                        :handler (fn [ctx {:keys [foo bar] :or {foo :default}} _]
-                                                   {:bar (inc bar) :baz foo})}]})]
-    (:domino.core/db (core/transact ctx [[[:bar] 1]]))
-    (is (= {:bar 2 :baz :default} (:domino.core/db (core/transact ctx [[[:bar] 1]]))))))
+                                        :outputs [:baz :a]
+                                        :handler (fn [{{:keys [foo bar]
+                                                        :or {foo :default}
+                                                        :as inputs} :inputs}]
+                                                   {:baz foo
+                                                    :a inputs})}]})]
+    (is (= {:bar 1 :baz :default :a {:bar 1}}
+           (:domino.core/db (core/transact ctx [{:bar 1}]))))))
+
+;; TODO: add constraint tests
+;; TODO: add tests for any new features
