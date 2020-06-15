@@ -45,7 +45,8 @@
      [cheshire "5.8.1"]
      [pjstadig/humane-test-output "0.9.0"]
      [criterium "0.4.5"]
-     [org.clojure/tools.namespace "0.3.1"]]
+     [org.clojure/tools.namespace "0.3.1"]
+     [org.clojure/core.async "1.2.603"]]
 
     :injections [(require 'pjstadig.humane-test-output)
                  (pjstadig.humane-test-output/activate!)]
@@ -75,7 +76,8 @@
                       :optimizations :none
                       :pretty-print  true}}}}}
    :test
-   {:cljsbuild
+   {:dependencies [[org.clojure/core.async "1.2.603"]]
+    :cljsbuild
     {:builds
      {:test
       {:source-paths ["src" "test"]

@@ -1,4 +1,6 @@
-(ns domino.util)
+(ns domino.util
+  #?(:cljs (:refer-clojure :exclude [random-uuid]))
+  #?(:clj (:import java.util.UUID)))
 
 (defn generate-sub-paths
   "Given a `path`, generate a list of all sub-paths including `path`"
@@ -23,3 +25,7 @@
                                 (not-empty)))]
     (assoc m k submap)
     (dissoc m k)))
+
+(defn random-uuid []
+  #?(:clj (UUID/randomUUID)
+     :cljs (clojure.core/random-uuid)))

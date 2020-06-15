@@ -6,8 +6,8 @@
    [domino.model :as model]
    [domino.validation :as validation]
    [domino.util :as util :refer [dissoc-in]]
-   [domino.rx :as rx]))
-
+   [domino.rx :as rx]
+   [clojure.pprint]))
 
 (defn compute-path [ctx id]
   ((::id->path ctx) id))
@@ -291,10 +291,15 @@
   (-> ctx ::rx ::db :value))
 
 (defn transact
+  ([ctx user-changes]
+   (if (::async? ctx)
+     (throw (ex-info "Schema is async, but no callback was provided!"
+                     {:schema (::schema ctx)
+                      :async? (::async? ctx)}))
+     (transact ctx user-changes identity)))
   ([{db-pre ::db :as ctx-pre} user-changes cb]
    (letfn [(rollback!
              [ctx]
-             (println "ROLLING BACK!")
              (-> ctx-pre
                  (dissoc ::db-hashes
                          ::event-queue)
@@ -302,7 +307,6 @@
                  cb))
            (append-db-hash!
              [ctx]
-             (println "APPENDING DB HASH")
              (let [hashes (::db-hashes ctx #{})
                    h (hash (get-db ctx))]
                (if (hashes h)
@@ -313,7 +317,6 @@
                  (update ctx ::db-hashes (fnil conj #{}) h))))
            (get-triggered-events
              [{state ::rx  events ::events :as ctx}]
-             (println "GETTING TRIGGERED EVENTS")
              (->> (rx/get-reaction state ::events)
                   (remove
                    (fn [ev]
@@ -322,17 +325,14 @@
                   not-empty))
            (append-events-to-queue
              [ctx]
-             (println "APPENDING EVENTS TO QUEUE")
              (let [triggered (get-triggered-events ctx)]
                (update ctx ::event-queue
                        (fnil (partial reduce conj) events/empty-queue)
                        triggered)))
            (handle-changes!
              [ctx changes post-cb]
-             (println "Handling changes..." changes)
              (resolve-changes ctx changes
                               (fn [{::keys [db transaction-report] :as ctx'}]
-                                (println "Resolve Changes Callback!")
                                 (if (= :failed (:status transaction-report))
                                   (rollback! ctx')
                                   (try
@@ -354,14 +354,12 @@
                                                                                      :data (ex-data ex)})))))))))
            (post-tx
              [{::keys [rx transaction-report] :as ctx}]
-             (println "Post-tx...")
              (let [fxs (if (= :complete (:status transaction-report))
                          (rx/get-reaction rx ::effects)
                          [])]
                (doseq [fx fxs
                        :let
                        [run-fx! (rx/get-reaction rx fx)]]
-                 (println "Effect: " fx)
                  ;; Evaluate each effect fn
                  (when (fn? run-fx!) (run-fx!)))
                (cb
@@ -373,7 +371,6 @@
                      ::triggered-effects fxs)))))
            (tx-step
              [ctx changes]
-             (println "tx-step..." changes)
              (handle-changes!
               ctx changes
               (fn [{state ::rx
@@ -381,8 +378,6 @@
                     ev-q  ::event-queue
                     tx-report ::transaction-report
                     :as ctx}]
-                (println "Handle Changes! Callback")
-                (clojure.pprint/pprint db)
                 (let [;; 2. Identify any conflicts that have arisen.
                       {::keys [unresolvable resolvers]
                        :as conflicts}
@@ -395,7 +390,6 @@
 
                     (and (empty? conflicts) (empty? ev-q))
                     (do
-                      (println "emptied conflicts and events: " (keys ctx))
                       (post-tx ctx))
 
                     (not-empty unresolvable)
@@ -412,7 +406,6 @@
                     (let [resolver-ids (vals resolvers)
                           {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
                           changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
-                      (println "Recurring with db: " (::db ctx) "changes: " changes " (resolvers: "resolvers")")
                       (tx-step ctx changes))
 
                     (not-empty conflicts)
@@ -425,36 +418,30 @@
 
                     :else
                     (letfn [(trigger-event [q c]
-                              (println "Triggering: " c)
                               (tx-step (-> ctx
                                            (assoc ::event-queue (pop q))
                                            (update ::event-history (fnil conj []) (peek q)))
                                        [c]))
                             ;; Pass state rx-map to allow use of `compute-reaction` for caching
                             (run-next-event [state q]
-                              (println "Run Next Event: " q)
                               (if (empty? q)
                                 (do
-                                  (println "Remaining events were nil.")
                                   (post-tx ctx))
                                 (let [ev-id (peek q)
                                       state (rx/compute-reaction state ev-id)
                                       c (rx/get-reaction state ev-id)]
-                                  (println "Got event: " (peek q) "Val: " c)
                                   (cond
                                     (nil? c)
                                     (recur state (pop q))
                                     (fn? c)
                                     (do
                                       (c (fn [r]
-                                           (println "Async event: " (peek q) " gave result: " r)
                                            (if (nil? r)
                                              (run-next-event state (pop q))
                                              (trigger-event q r)))))
                                     :else
                                     (trigger-event q c)))))]
                       (run-next-event state ev-q)))))))]
-     (println "Transacting...")
      (tx-step (-> ctx-pre
                   (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
                   (update ::rx rx/update-root assoc ::db-pre db-pre)) ;; Add db-pre for event triggering
@@ -727,7 +714,6 @@
 (defn add-effect-rxns! [state effects]
   (let [incoming-effects (filter #(seq (:outputs %)) effects)
         outgoing-effects (filter #(seq (:inputs %)) effects)]
-    (println incoming-effects)
     (rx/add-reaction!
      (reduce
       add-incoming-effect-to-state!
@@ -864,22 +850,48 @@
      ::upstream-deep (deep-relationships (::upstream ctx'))
      ::downstream-deep (deep-relationships (::downstream ctx')))))
 
+(defn add-default-id [m]
+  (update m :id #(or % (util/random-uuid))))
+
+(defn normalize-schema [schema]
+  (-> schema
+      (update :events (partial mapv add-default-id))
+      (update :effects (partial mapv add-default-id))
+      (update :constraints (partial mapv add-default-id))))
+
+(defn schema-is-async? [schema]
+  (if (some :async? (:events schema))
+    true
+    (some
+     #(some-> %
+              second
+              :schema
+              schema-is-async?)
+     (walk-model (:model schema) {}))))
+
 (defn initialize
-  ([schema cb]
-   (println "Defaulting to empty DB...")
-   (initialize schema {} cb))
+  ([schema]
+   (initialize schema {} nil))
+  ([schema cb-or-db]
+   (if (map? cb-or-db)
+     (initialize schema cb-or-db nil)
+     (initialize schema {} cb-or-db)))
   ([schema initial-db cb]
-   (println "Initializing...")
    (try
-     (let [fields (walk-model (:model schema) {})]
-       (println "Got Fields: " fields)
+     (let [schema (normalize-schema schema)
+           fields (walk-model (:model schema) {})
+           async? (boolean (schema-is-async? schema))]
+       (when (and async? (nil? cb))
+         (throw (ex-info "Schema is async, but no callback was provided!"
+                         {:schema schema
+                          :async? async?})))
        (add-fields-to-ctx
         {::db initial-db
          ::rx (rx/create-reactive-map initial-db)
-         ::schema schema}
+         ::schema schema
+         ::async? async?}
         fields
         (fn [ctx]
-          (println "Added fields!")
           (-> ctx
               (update ::rx rx/add-reactions! (into (::reactions ctx)
                                                    (parse-reactions schema)))
@@ -887,28 +899,33 @@
               (update ::rx add-event-rxns! (:events schema []))
               (update ::rx add-effect-rxns! (:effects schema []))
               (compute-relationships)
-              (transact [] cb)))))
+              ;; NOTE: this transact will not trigger events!
+              ;;       does this need to be changed?
+              (transact [] (or cb identity))))))
      (catch #?(:clj Throwable
                :cljs js/Error) e
-       (println e)))))
+       (if (nil? cb)
+         (throw e)
+         (cb e))))))
 
 (defn trigger-effects
-  [ctx triggers cb]
-  (transact ctx (reduce
-                 (fn [changes [id args]]
-                   (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
-                     (do
-                       (println fx-fn)
-                       (println id)
-                       (println args)
-                       (println (fx-fn args))
-                       (conj
-                        changes
-                        (fx-fn args)))
-                     changes))
-                 []
-                 triggers)
-            cb))
+  ([ctx triggers]
+   (if (::async? ctx)
+     (throw (ex-info "Schema is async, but no callback was provided!"
+                     {:schema (::schema ctx)
+                      :async? (::async ctx)}))
+     (trigger-effects ctx triggers nil)))
+  ([ctx triggers cb]
+   (transact ctx (reduce
+                  (fn [changes [id args]]
+                    (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
+                      (conj
+                       changes
+                       (fx-fn args))
+                      changes))
+                  []
+                  triggers)
+             (or cb identity))))
 
 (def full-name-constraint
   {:id :compute-full-name
@@ -958,8 +975,7 @@
             [:out {:id :out}]
             [:ms {:id :ms :val-if-missing 1000}]]]
    :constraints [full-name-constraint]
-   :events [{:id :event/convert-w
-             :inputs [:w]
+   :events [{:inputs [:w]
              :outputs [:w-lb]
              :handler
              (fn [{{:keys [w]} :inputs
@@ -1003,22 +1019,7 @@
              :ignore-changes [:h]
              :outputs [:w]
              :handler (fn [{{:keys [h bmi]} :inputs}]
-                        {:w (* bmi h h)})}
-            {:id :event/set-out
-             :inputs [:in :ms]
-             :ignore-changes [:ms]
-             :outputs [:out]
-             :async? true
-             :should-run (fn [{{:keys [in]} :inputs {:keys [out]} :outputs}]
-                           (or (not= in out) (println "Skipping...")))
-             :handler (fn [{{:keys [in ms]} :inputs {:keys [out]} :outputs} cb]
-                        (println "in: " in "ms: " ms)
-                        #?(:clj
-                           (cb {:out in})
-                           :cljs
-                           (js/setTimeout
-                            #(cb {:out in})
-                            ms)))}]
+                        {:w (* bmi h h)})}]
    :effects
    [{:id :fx/print-bmi
      :inputs [:bmi]
@@ -1036,6 +1037,27 @@
                  :w (or w 200)
                  :in (or in 40)
                  :ms (or ms 500)})}]})
+
+(def example-schema-async (update example-schema-trivial :events conj
+                                  {:id :event/set-out
+                                   :inputs [:in :ms]
+                                   :ignore-changes [:ms]
+                                   :outputs [:out]
+                                   :async? true
+                                   :should-run (fn [{{:keys [in]} :inputs {:keys [out]} :outputs}]
+                                                 (or (not= in out) (println "Skipping..." in out)))
+                                   :handler (fn [{{:keys [in ms]} :inputs {:keys [out]} :outputs} cb]
+                                              (println "in: " in "ms: " ms)
+                                              #?(:clj
+                                                 (future
+                                                   (println "Sleeping for ms: " ms)
+                                                   (Thread/sleep ms)
+                                                   (println "WOKE UP!")
+                                                   (cb {:out in}))
+                                                 :cljs
+                                                 (js/setTimeout
+                                                  #(cb {:out in})
+                                                  ms)))}))
 
 
 (def example-schema-nested
@@ -1087,7 +1109,7 @@
        [:start {:id :start-date}]
        [:end {:id :end-date}]
        [:length {:id :shift-length}]]]
-     :events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
+     #_#_:events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
                :outputs [[:patient :medication :unit]]}]})
 
 (def example-schema-2
