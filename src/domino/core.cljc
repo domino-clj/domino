@@ -95,25 +95,25 @@
          (fn [acc k v]
            (into acc
                  (if (coll? v)
-                   (if-let [{::keys [collection? index-id]} ((::subcontexts ctx) k)]
+                   (if-let [{::keys [collection? index-id]} (get (::subcontexts ctx) k)]
                      (if collection?
-                          (reduce-kv
-                           (fn [acc idx vv]
-                             (into
-                              acc
-                              (parse-change
-                               ctx
-                               [::update-child [k idx] [::set vv]])))
-                           []
-                           (if (map? v)
-                             v
-                             (reduce
-                              (fn [acc vv]
-                                (assoc acc (get vv index-id) vv))
-                              {}
-                              v)))
-                          (parse-change ctx
-                                        [::update-child [k] [::set v]]))
+                       (reduce-kv
+                        (fn [acc idx vv]
+                          (into
+                           acc
+                           (parse-change
+                            ctx
+                            [::update-child [k idx] [::set vv]])))
+                        []
+                        (if (map? v)
+                          v
+                          (reduce
+                           (fn [acc vv]
+                             (assoc acc (get vv index-id) vv))
+                           {}
+                           v)))
+                       (parse-change ctx
+                                     [::update-child [k] [::set v]]))
                      (parse-change ctx [::set-value k v]))
                    (parse-change ctx [::set-value k v]))))
          []
@@ -196,7 +196,13 @@
     (cond
       ;; Check if a custom change fn exists, and pass each resultant change to the parser again
       (contains? (::custom-change-fns ctx) (first change))
-      (reduce into [] (map (partial parse-change ctx) ((::custom-change-fns ctx) change)))
+      (reduce
+       into
+       []
+       (map
+        (partial parse-change ctx)
+        ((::custom-change-fns ctx)
+         change)))
 
       ;; Default to set-value if the first element is a keyword with a valid path
       (and (keyword? (first change)) (compute-path ctx (first change)))
@@ -269,7 +275,7 @@
                                    [::transaction-report :changes]
                                    (fnil into [])
                                    parsed-changes)
-                                  (post-cb)))
+                                  post-cb))
                             (fn on-fail
                               [ex]
                               (let [data (ex-data ex)]
@@ -278,6 +284,7 @@
                                   (post-cb
                                    (assoc ctx ::transaction-report {:status :failed
                                                                     :reason ::invalid-change
+                                                                    :message (ex-message ex)
                                                                     :data   data}))
                                   (throw ex))))))
     (catch #?(:clj Exception :cljs js/Error) ex
@@ -285,7 +292,8 @@
         (post-cb
          (assoc ctx ::transaction-report {:status :failed
                                           :reason ::change-parsing-failed
-                                          :data   data}))))))
+                                          :data   data
+                                          :message (ex-message ex)}))))))
 
 (defn get-db [ctx]
   (-> ctx ::rx ::db :value))
@@ -635,7 +643,19 @@
                                 :outputs-pre [::outputs-pre id]}
                          :args-format :map
                          :fn
-                         (letfn [(process-result [r o]
+                         (letfn [(drop-nils [m]
+                                   (into {}
+                                         (filter
+                                          (comp some? val))
+                                         m))
+                                 (process-args [a]
+                                   (-> a
+                                       (update :inputs drop-nils)
+                                       (update :outputs drop-nils)
+                                       (update :inputs-pre drop-nils)
+                                       (update :outputs-pre drop-nils)
+                                       (update :ctx-args drop-nils)))
+                                 (process-result [r o]
                                    (reduce-kv
                                     (fn [acc k v]
                                       (if (not= (get r k v) v)
@@ -643,15 +663,16 @@
                                         acc))
                                     nil
                                     o))]
-                           (fn [a]
-                             (when (or (not (ifn? should-run)) (should-run a))
-                               (if async?
-                                 (fn [cb]
-                                   (handler
-                                    a
-                                    (fn [result]
-                                      (cb (process-result result (:outputs a))))))
-                                 (process-result (handler a) (:outputs a))))))})))
+                           (fn [{:keys [outputs] :as a}]
+                             (let [a (process-args a)]
+                               (when (or (not (ifn? should-run)) (should-run a))
+                                 (if async?
+                                   (fn [cb]
+                                     (handler
+                                      a
+                                      (fn [result]
+                                        (cb (process-result result outputs)))))
+                                   (process-result (handler a) outputs))))))})))
 
 (defn add-event-rxns! [state events]
   (->
@@ -917,12 +938,13 @@
      (trigger-effects ctx triggers nil)))
   ([ctx triggers cb]
    (transact ctx (reduce
-                  (fn [changes [id args]]
-                    (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
-                      (conj
-                       changes
-                       (fx-fn args))
-                      changes))
+                  (fn [changes fx]
+                    (let [[id args] (if (coll? fx) fx [fx nil])]
+                      (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
+                        (conj
+                         changes
+                         (fx-fn args))
+                        changes)))
                   []
                   triggers)
              (or cb identity))))
