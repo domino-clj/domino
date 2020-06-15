@@ -51,7 +51,7 @@
     :injections [(require 'pjstadig.humane-test-output)
                  (pjstadig.humane-test-output/activate!)]
 
-    :source-paths ["src" "env/dev/clj" "env/dev/cljs"]
+    :source-paths ["src" "env/dev/clj" "env/dev/cljc" "env/dev/cljs"]
     :resource-paths ["resources" "env/dev/resources" "target/cljsbuild"]
 
     :figwheel

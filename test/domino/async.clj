@@ -5,26 +5,42 @@
 
 (deftest async-handler-test
   (let [result (atom nil)
-        ctx    (core/initialize {:model   [[:foo {:id :foo}]
-                                           [:bar {:id :bar}]
-                                           [:baz {:id :baz}]
-                                           [:buz {:id :buz}]]
-                                 :events  [{:async? true
-                                            :inputs  [:foo]
-                                            :outputs [:bar]
-                                            :handler (fn [ctx {:keys [foo]} _ cb]
-                                                       (cb {:bar (inc foo)}))}
-                                           {:async? true
-                                            :inputs  [:bar]
-                                            :outputs [:baz]
-                                            :handler (fn [ctx {:keys [bar]} _ cb]
-                                                       (cb {:baz (inc bar)}))}
-                                           {:inputs  [:baz]
-                                            :outputs [:buz]
-                                            :handler (fn [ctx {:keys [baz]} _]
-                                                       {:buz (inc baz)})}]
-                                 :effects [{:inputs  [:buz]
-                                            :handler (fn [ctx {:keys [buz]}]
-                                                       (reset! result buz))}]})]
-    (:domino.core/db (core/transact ctx [[[:foo] 1]]))
+        ctx (promise)
+        ctx' (promise)]
+    (core/initialize {:model   [[:foo {:id :foo}]
+                                [:bar {:id :bar}]
+                                [:baz {:id :baz}]
+                                [:buz {:id :buz}]]
+                      :events  [{:id :ev/bar
+                                 :async? true
+                                 :inputs  [:foo]
+                                 :outputs [:bar]
+                                 :handler (fn [{{:keys [foo] :as inputs} :inputs
+                                                :keys [inputs-pre outputs-pre]} cb]
+                                            (future
+                                              (Thread/sleep 100)
+                                              (cb {:bar (inc foo)})))}
+                                {:id :ev/baz
+                                 :async? true
+                                 :inputs  [:bar]
+                                 :outputs [:baz]
+                                 :handler (fn [{{:keys [bar] :as inputs} :inputs
+                                                :keys [inputs-pre outputs-pre]} cb]
+                                            (future
+                                              (Thread/sleep 100)
+                                              (cb {:baz (inc bar)})))}
+                                {:id :ev/buz
+                                 :inputs  [:baz]
+                                 :outputs [:buz]
+                                 :handler (fn [{{:keys [baz]} :inputs}]
+                                            {:buz (inc baz)})}]
+                      :effects [{:inputs  [:buz]
+                                 :handler (fn [{{:keys [buz]} :inputs}]
+                                            (reset! result buz))}]}
+                     (fn [r]
+                       (deliver ctx r)))
+    (core/transact (deref ctx 10000 nil) [{:foo 1}]
+                   (fn [r]
+                     (deliver ctx' r)))
+    (is (= {:foo 1 :bar 2 :baz 3 :buz 4} (:domino.core/db (deref ctx' 10000 nil))))
     (is (= 4 @result))))

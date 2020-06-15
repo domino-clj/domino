@@ -6,8 +6,7 @@
    [domino.model :as model]
    [domino.validation :as validation]
    [domino.util :as util :refer [dissoc-in]]
-   [domino.rx :as rx]
-   [clojure.pprint]))
+   [domino.rx :as rx]))
 
 (defn compute-path [ctx id]
   ((::id->path ctx) id))
@@ -325,12 +324,13 @@
                  (update ctx ::db-hashes (fnil conj #{}) h))))
            (get-triggered-events
              [{state ::rx  events ::events :as ctx}]
-             (->> (rx/get-reaction state ::events)
-                  (remove
-                   (fn [ev]
-                     ;;TODO: drop events that should be ignored.
-                     false))
-                  not-empty))
+             (let [triggered-evs (rx/get-reaction state ::events)]
+               (->> triggered-evs
+                    (remove
+                     (fn [ev]
+                       ;;TODO: drop events that should be ignored.
+                       false))
+                    not-empty)))
            (append-events-to-queue
              [ctx]
              (let [triggered (get-triggered-events ctx)]
@@ -345,7 +345,11 @@
                                   (rollback! ctx')
                                   (try
                                     (-> ctx'
-                                        (update ::rx rx/update-root assoc ::db db)
+                                        (update ::rx rx/update-root
+                                                (fn [{db-pre ::db :as root}]
+                                                  (assoc root
+                                                         ::db db
+                                                         ::db-pre db-pre)))
                                         (append-events-to-queue)
                                         append-db-hash!
                                         post-cb)
@@ -433,8 +437,7 @@
                             ;; Pass state rx-map to allow use of `compute-reaction` for caching
                             (run-next-event [state q]
                               (if (empty? q)
-                                (do
-                                  (post-tx ctx))
+                                (post-tx ctx)
                                 (let [ev-id (peek q)
                                       state (rx/compute-reaction state ev-id)
                                       c (rx/get-reaction state ev-id)]
@@ -442,17 +445,19 @@
                                     (nil? c)
                                     (recur state (pop q))
                                     (fn? c)
-                                    (do
-                                      (c (fn [r]
-                                           (if (nil? r)
-                                             (run-next-event state (pop q))
-                                             (trigger-event q r)))))
+                                    (c (fn [r]
+                                         (if (nil? r)
+                                           (run-next-event state (pop q))
+                                           (trigger-event q r))))
                                     :else
                                     (trigger-event q c)))))]
                       (run-next-event state ev-q)))))))]
      (tx-step (-> ctx-pre
                   (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
-                  (update ::rx rx/update-root assoc ::db-pre db-pre)) ;; Add db-pre for event triggering
+                  (update ::rx rx/update-root
+                          assoc
+                          ::db-pre   db-pre
+                          ::db-start db-pre)) ;; Add db-pre for event triggering
               user-changes))))                                        ;; Start tx with user driven changes.
 
 (defn model-map-merge [opts macc m]
@@ -491,6 +496,9 @@
                         {:id ::db-pre
                          :args ::rx/root
                          :fn ::db-pre}
+                        {:id ::db-start
+                         :args ::rx/root
+                         :fn ::db-start}
                           ;; NOTE: send hash to user for each change to guarantee synchronization
                           ;;       - Also, for each view declared, create a sub for the sub-db it cares about
                           ;;       - Also, consider keeping an aggregate of transactions outside of ::db (or each view) to enable looking up an incremental changeset, rather than a total refresh
@@ -695,7 +703,7 @@
                          :fn identity})
       (rx/add-reaction! {:id [::trigger? id]
                          :args (->> inputs
-                                    (mapv (partial conj [::changed?])))
+                                    (mapv (partial conj [::changed-ever?])))
                          :args-format :vector
                          :fn #(when (some true? %&)
                                 id)})
@@ -768,8 +776,16 @@
                                                            :args ::db-pre
                                                            :args-format :single
                                                            :fn #(get-in % path (:val-if-missing m))}
+                                                          {:id [::start id]
+                                                           :args ::db-start
+                                                           :args-format :single
+                                                           :fn #(get-in % path (:val-if-missing m))}
                                                           {:id [::changed? id]
                                                            :args [id [::pre id]]
+                                                           :args-format :vector
+                                                           :fn #(not= %1 %2)}
+                                                          {:id [::changed-ever? id]
+                                                           :args [id [::start id]]
                                                            :args-format :vector
                                                            :fn #(not= %1 %2)}]))
                 (not-empty m) (update ::id->opts (fnil assoc {}) id m))]
@@ -949,226 +965,10 @@
                   triggers)
              (or cb identity))))
 
-(def full-name-constraint
-  {:id :compute-full-name
-   :query {:f :given-name
-           :l :surname
-           :n :full-name}
-   :return {:n :full-name}
-   :pred (fn [{:keys [f l n]}]
-           (= (if (or (empty? f) (empty? l))
-                (or (not-empty f) (not-empty l))
-                (str l ", " f))
-              n))
-   :resolver (fn [{:keys [f l n]}]
-               {:n (if (or (empty? f) (empty? l))
-                     (or (not-empty f) (not-empty l))
-                     (str l ", " f))})})
-
-(def example-schema-trivial
-  "
-  This schema is the simplest type. It has no rules, no validation, no computation, and no collections.
-  It is trivial, and is equivalent to a nested map.
-  For example:
-  (transact <instance> [[:mrn \"1234123\"] [:surname \"Anderson\"]])
-  is equivalent to:
-  (update <instance> ::db
-         #(-> %
-              (assoc-in [:patient :mrn] \"1234123\")
-              (assoc-in [:patient :name :surname] \"Anderson\")))
-
-  (select <instance> :mrn) NOTE: API for selecting to be determined
-  is equivalent to:
-  (get-in <instance> [::db :patient :mrn])"
-  {:model [[:mrn {:id :mrn}]
-           [:name
-            [:first {:id :given-name}]
-            [:last  {:id :surname}]
-            [:full {:id :full-name}]]
-           [:height
-            [:metres {:id :h :val-if-missing 0}]
-            [:inches {:id :h-in :val-if-missing 0}]]
-           [:weight
-            [:kilograms {:id :w :val-if-missing 0}]
-            [:pounds    {:id :w-lb :val-if-missing 0}]]
-           [:bmi    {:id :bmi}]
-           [:async
-            [:in {:id :in}]
-            [:out {:id :out}]
-            [:ms {:id :ms :val-if-missing 1000}]]]
-   :constraints [full-name-constraint]
-   :events [{:inputs [:w]
-             :outputs [:w-lb]
-             :handler
-             (fn [{{:keys [w]} :inputs
-                   {:keys [w-lb]} :outputs}]
-               (when-not (< -0.01 (- (* w 2.2) w-lb) 0.01)
-                 {:w-lb
-                  (* w 2.2)}))}
-            {:id :event/convert-w-lb
-             :inputs [:w-lb]
-             :outputs [:w]
-             :handler
-             (fn [{{:keys [w-lb]} :inputs
-                   {:keys [w]}    :outputs}]
-               (when-not (< -0.01 (- (* w 2.2) w-lb) 0.01)
-                 {:w (/ w-lb 2.2)}))}
-            {:id :event/convert-h
-             :inputs [:h]
-             :outputs [:h-in]
-             :handler
-             (fn [{{:keys [h]} :inputs
-                   {:keys [h-in]} :outputs}]
-               (when-not (< -0.01 (- (* h-in 0.0254) h) 0.01)
-                   {:h-in (/ h 0.0254)}))}
-            {:id :event/convert-h-in
-             :inputs [:h-in]
-             :outputs [:h]
-             :handler
-             (fn [{{:keys [h-in]} :inputs
-                   {:keys [h]} :outputs}]
-               (when-not (< -0.01 (- (* h-in 0.0254) h) 0.01)
-                 {:h (* h-in 0.0254)}))}
-            {:id :event/bmi
-             :inputs [:h :w]
-             :outputs [:bmi]
-             :handler (fn [{{:keys [h w]} :inputs}]
-                        (if (= 0 h)
-                          {:bmi nil}
-                          {:bmi (/ w h h)}))}
-            {:id :event/w
-             :inputs [:h :bmi]
-             :ignore-changes [:h]
-             :outputs [:w]
-             :handler (fn [{{:keys [h bmi]} :inputs}]
-                        {:w (* bmi h h)})}]
-   :effects
-   [{:id :fx/print-bmi
-     :inputs [:bmi]
-     :handler (fn [{{:keys [bmi]} :inputs}]
-                (println "\n\n\n\n\nBMI:")
-                (println bmi)
-                (println "\n\n\n\n\n"))}
-    {:id :fx/set-patient
-     :outputs [:given-name :surname :h :w :in :ms]
-     :handler (fn [{{:keys [f l h w in ms] :as args} :args}]
-                (println args)
-                {:given-name (or f "John")
-                 :surname (or l "Doe")
-                 :h (or h 1.85)
-                 :w (or w 200)
-                 :in (or in 40)
-                 :ms (or ms 500)})}]})
-
-(def example-schema-async (update example-schema-trivial :events conj
-                                  {:id :event/set-out
-                                   :inputs [:in :ms]
-                                   :ignore-changes [:ms]
-                                   :outputs [:out]
-                                   :async? true
-                                   :should-run (fn [{{:keys [in]} :inputs {:keys [out]} :outputs}]
-                                                 (or (not= in out) (println "Skipping..." in out)))
-                                   :handler (fn [{{:keys [in ms]} :inputs {:keys [out]} :outputs} cb]
-                                              (println "in: " in "ms: " ms)
-                                              #?(:clj
-                                                 (future
-                                                   (println "Sleeping for ms: " ms)
-                                                   (Thread/sleep ms)
-                                                   (println "WOKE UP!")
-                                                   (cb {:out in}))
-                                                 :cljs
-                                                 (js/setTimeout
-                                                  #(cb {:out in})
-                                                  ms)))}))
-
-
-(def example-schema-nested
-    "
-  This schema is an example of non-collection nesting.
-  This allows you to defer to the inner schema of `:patient` for accessing its contents.
-  For example:
-  (transact <instance> [[[:patient :surname] \"Anderson\"] [:bed-id \"122-A\"] [[:patient :given-name] \"Mr.\"]])
-  is equivalent to:
-  (update <instance> ::db
-          #(-> %
-              (update-in [:patient] transact [[:surname \"Anderson\"]])
-              (assoc-in  [:bed] \"122-A\")
-              (update-in [:patient] transact [[:surname \"Mr.\"]])))
-
-  (transact <instance [[:patient {:mrn \"1234123\" :name {:first \"Mr.\" :last \"Anderson\"}}]])
-
-  (select <instance> [:patient :surname])
-  is equivalent to:
-  (select (get-in <instance> [::db :patient]) :surname)
-
-  NOTE:
-  (select <instance> :patient)
-  is NOT:
-  (get-in <instance> [::db :patient])
-  but rather:
-  (get-in <instance> [::db :patient ::db])
-  "
-    {:model [[:bed {:id :bed-id}]
-             [:stay
-              [:start {:id :start}]
-              [:end   {:id :end}]]
-             [:label {:id :label}]
-             [:patient {:id :patient
-                        :schema
-                        example-schema-trivial}]]})
-
-(def example-schema-1
-    ""
-    {:model
-     [[:patients
-       {:id :patients
-        :index-id :mrn
-        :order-by [:surname :given-name :mrn]
-        :collection? true
-        :schema
-        example-schema-trivial}]
-      [:shift
-       [:start {:id :start-date}]
-       [:end {:id :end-date}]
-       [:length {:id :shift-length}]]]
-     #_#_:events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
-               :outputs [[:patient :medication :unit]]}]})
-
-(def example-schema-2
-    ""
-    {:model
-     [[:patients
-       {:id :patients
-        :index-id :mrn
-        :order-by [:surname :given-name :mrn]
-        :collection? true
-        :schema
-        {:constraints [full-name-constraint]
-         :model
-         [[:mrn {:id :mrn}]
-          [:name
-           [:first {:id :given-name}]
-           [:last {:id :surname}]
-           [:full {:id :full-name}]]
-          [:risk {:id :risk}]
-          [:medications
-           {:id :medications
-            :index-id :rx-id
-            :order-by [:creation-date :rx-id]
-            :collection? true
-            :schema
-            {:model
-             [[:rx-id {:id :rx-id}]
-              [:creation-date {:id :creation-date}]
-              [:name {:id :drug}]
-              [:dose {:id :dose}]
-              [:unit {:id :unit}]]}}]]}}]
-      [:shift
-       [:start {:id :start-date}]
-       [:end {:id :end-date}]
-       [:length {:id :shift-length}]]]
-     :events [{:inputs [:shift-length [:patient :medication :dose]] ;; [:patients "1234123" :medications "224-A" :dose]
-               :outputs [[:patient :medication :unit]]}]})
+(defn select
+  [ctx id]
+  ;; TODO: Implement selection from subcontexts.
+  )
 
 ;; EVENTS
 
@@ -1196,9 +996,8 @@
 ;; TODO
 ;; - DONE Prevent empty subcontexts from generating a map.
 ;; - TODO Support cross-context paths for non-collection subcontexts
-;; - Reference old version from events possibly
 ;; - Add relatedness fns
-;; - Add event-style rules
+;; - DONE Add event-style rules
 ;; - Add computation/derivation-style rules
 ;; - Add intermediate-value rules
 ;; - Ensure as much feature parity as possible
@@ -1211,39 +1010,41 @@
 ;; OLD VERSION
 ;; ==============================================================================
 
-#?(:clj
-   (defmacro event [[_ in out :as args] & body]
-     (let [in-ks#  (mapv keyword (:keys in))
-           out-ks# (mapv keyword (:keys out))]
-       {:inputs  in-ks#
-        :outputs out-ks#
-        :handler `(fn ~(vec args) ~@body)})))
+(comment
 
-(defn transact-old
-  "Take the context and the changes which are an ordered collection of changes
+  #?(:clj
+     (defmacro event [[_ in out :as args] & body]
+       (let [in-ks#  (mapv keyword (:keys in))
+             out-ks# (mapv keyword (:keys out))]
+         {:inputs  in-ks#
+          :outputs out-ks#
+          :handler `(fn ~(vec args) ~@body)})))
+
+  (defn transact-old
+    "Take the context and the changes which are an ordered collection of changes
 
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
-  [ctx changes]
-  (let [updated-ctx (events/execute-events ctx changes)]
-    (effects/execute-effects! updated-ctx)
-    updated-ctx))
+    [ctx changes]
+    (let [updated-ctx (events/execute-events ctx changes)]
+      (effects/execute-effects! updated-ctx)
+      updated-ctx))
 
-(defn initial-transaction-old
-  "If initial-db is not empty, transact with initial db as changes"
-  [{::keys [model] :as ctx} initial-db]
-  (if (empty? initial-db)
-    ctx
-    (transact-old ctx
-              (reduce
-                (fn [inputs [_ path]]
-                  (if-some [v (get-in initial-db path)]
-                    (conj inputs [path v])
-                    inputs))
-                []
-                (:id->path model)))))
+  (defn initial-transaction-old
+    "If initial-db is not empty, transact with initial db as changes"
+    [{::keys [model] :as ctx} initial-db]
+    (if (empty? initial-db)
+      ctx
+      (transact-old ctx
+                    (reduce
+                     (fn [inputs [_ path]]
+                       (if-some [v (get-in initial-db path)]
+                         (conj inputs [path v])
+                         inputs))
+                     []
+                     (:id->path model)))))
 
-(defn initialize-old
-  "Takes a schema of :model, :events, and :effects
+  (defn initialize-old
+    "Takes a schema of :model, :events, and :effects
 
   1. Parse the model
   2. Inject paths into events
@@ -1256,28 +1057,28 @@
     ::effects => a vector of effects with functions that produce external effects
     ::state => the state of actual working data
     "
-  ([schema]
-   (initialize-old schema {}))
-  ([{:keys [model effects events] :as schema} initial-db]
-   ;; Validate schema
-   (validation/maybe-throw-exception (validation/validate-schema schema))
-   ;; Construct ctx
-   (let [model  (model/model->paths model)
-         ;; TODO: Generate trivial events for all paths with `:pre` or `:post` and no event associated.
-         events (model/connect-events model events)]
-     (initial-transaction-old
-       {::model         model
-        ::events        events
-        ::events-by-id  (util/map-by-id events)
-        ::effects       (effects/effects-by-paths (model/connect-effects model effects))
-        ::effects-by-id (util/map-by-id effects)
-        ::db            initial-db
-        ::graph         (graph/gen-ev-graph events)}
-       initial-db))))
+    ([schema]
+     (initialize-old schema {}))
+    ([{:keys [model effects events] :as schema} initial-db]
+     ;; Validate schema
+     (validation/maybe-throw-exception (validation/validate-schema schema))
+     ;; Construct ctx
+     (let [model  (model/model->paths model)
+           ;; TODO: Generate trivial events for all paths with `:pre` or `:post` and no event associated.
+           events (model/connect-events model events)]
+       (initial-transaction-old
+        {::model         model
+         ::events        events
+         ::events-by-id  (util/map-by-id events)
+         ::effects       (effects/effects-by-paths (model/connect-effects model effects))
+         ::effects-by-id (util/map-by-id effects)
+         ::db            initial-db
+         ::graph         (graph/gen-ev-graph events)}
+        initial-db))))
 
-(defn trigger-effects-old
-  "Triggers effects by ids as opposed to data changes
+  (defn trigger-effects-old
+    "Triggers effects by ids as opposed to data changes
 
   Accepts the context, and a collection of effect ids"
-  [ctx effect-ids]
-  (transact-old ctx (effects/effect-outputs-as-changes ctx effect-ids)))
+    [ctx effect-ids]
+    (transact-old ctx (effects/effect-outputs-as-changes ctx effect-ids))))

@@ -1,7 +1,9 @@
 (ns user
- (:require
-  [figwheel-sidecar.repl-api :as ra]
-  [clojure.tools.namespace.repl :as repl]))
+  (:require
+   [domino.core :as core :refer [transact initialize trigger-effects select]]
+   [domino.examples :refer :all]
+   [figwheel-sidecar.repl-api :as ra]
+   [clojure.tools.namespace.repl :as repl]))
 
 (def refresh repl/refresh)
 
