@@ -761,11 +761,15 @@
 
 (declare initialize)
 
+(defn schema-is-async? [schema]
+  (boolean (some :async? (:events schema))))
+
 (defn add-fields-to-ctx [{::keys [db] :as ctx} [field :as fields] on-complete]
   (if (empty? fields)
     (on-complete ctx)
     (let [[id {::keys [path] :keys [collection? schema index-id] :as m}] field
           ctx (cond-> ctx
+                (not-empty m) (update ::id->opts (fnil assoc {}) id m)
                 path (->
                       (update ::id->path (fnil assoc {}) id path)
                       (update ::reactions (fnil into []) [{:id id
@@ -788,7 +792,7 @@
                                                            :args [id [::start id]]
                                                            :args-format :vector
                                                            :fn #(not= %1 %2)}]))
-                (not-empty m) (update ::id->opts (fnil assoc {}) id m))]
+                (and schema (schema-is-async? schema)) (assoc ::async? true))]
       (cond
         (and schema collection?)
         (letfn [(create-element
@@ -896,16 +900,6 @@
       (update :effects (partial mapv add-default-id))
       (update :constraints (partial mapv add-default-id))))
 
-(defn schema-is-async? [schema]
-  (if (some :async? (:events schema))
-    true
-    (some
-     #(some-> %
-              second
-              :schema
-              schema-is-async?)
-     (walk-model (:model schema) {}))))
-
 (defn initialize
   ([schema]
    (initialize schema {} nil))
@@ -916,19 +910,18 @@
   ([schema initial-db cb]
    (try
      (let [schema (normalize-schema schema)
-           fields (walk-model (:model schema) {})
-           async? (boolean (schema-is-async? schema))]
-       (when (and async? (nil? cb))
-         (throw (ex-info "Schema is async, but no callback was provided!"
-                         {:schema schema
-                          :async? async?})))
+           fields (walk-model (:model schema) {})]
        (add-fields-to-ctx
         {::db initial-db
          ::rx (rx/create-reactive-map initial-db)
          ::schema schema
-         ::async? async?}
+         ::async? (schema-is-async? schema)}
         fields
-        (fn [ctx]
+        (fn [{::keys [async?] :as ctx}]
+          (when (and async? (nil? cb))
+            (throw (ex-info "Schema is async, but no callback was provided!"
+                            {:schema schema
+                             :async? async?})))
           (-> ctx
               (update ::rx rx/add-reactions! (into (::reactions ctx)
                                                    (parse-reactions schema)))
