@@ -13,14 +13,14 @@
                     [:last-name {:id :lname}]
                     [:full-name {:id :full-name}]]]
          :effects [{:inputs  [:fname :lname :full-name]
-                    :handler (fn [_ {:keys [fname lname full-name]}]
+                    :handler (fn [{{:keys [fname lname full-name]} :inputs}]
                                (swap! state assoc
                                       :first-name fname
                                       :last-name lname
                                       :full-name full-name))}]
          :events  [{:inputs  [:fname :lname]
                     :outputs [:full-name]
-                    :handler (fn [_ {:keys [fname lname]} _]
+                    :handler (fn [{{:keys [fname lname]} :inputs}]
                                {:full-name (or (when (and fname lname) (str lname ", " fname))
                                                fname
                                                lname)})}]}))))
@@ -34,14 +34,14 @@
                           [:d {:id :d}]]]
                :events  [{:inputs  [:a :b]
                           :outputs [:c]
-                          :handler (fn [_ {:keys [a b]} _]
+                          :handler (fn [{{:keys [a b]} :inputs}]
                                      {:c "C"})}
                          {:inputs  [:b :c]
                           :outputs [:d]
-                          :handler (fn [_ {:keys [b c]} _]
+                          :handler (fn [{{:keys [b c]} :inputs}]
                                      {:d "D"})}
                          {:inputs  [:d]
                           :outputs [:a]
-                          :handler (fn [_ {:keys [d]} _]
+                          :handler (fn [{{:keys [d]} :inputs}]
                                      {:a "A"})}]})]
-    (criterium/bench (core/transact ctx [[[:a] 1] [[:b] 1]]))))
+    (criterium/bench (core/transact ctx [[::core/set-value :a 1] [::core/set-value :b 1]]))))

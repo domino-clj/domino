@@ -7,6 +7,8 @@
     [domino.model :as model]
     [domino.core :as core]))
 
+
+;; TODO: move event logic to events ns
 (def test-model
   (model/model->paths
     [[:a {:id :a}]

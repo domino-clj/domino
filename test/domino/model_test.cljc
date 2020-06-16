@@ -7,6 +7,8 @@
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 
+;; TODO: move model logic to model ns.
+
 (deftest model-parse-test
   (let [model [[:title {:validation []}]
                [:user {:id :user}
@@ -70,4 +72,3 @@
                                   [[(id->path :fname) "Bob"]
                                    [(id->path :lname) "Bobberton"]])
             [::core/db ::core/change-history])))))
-

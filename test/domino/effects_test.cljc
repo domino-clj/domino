@@ -5,6 +5,8 @@
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 
+;; TODO: Move effect logic to effects ns.
+
 (deftest effects-test
   (let [data (atom nil)]
     (effects/execute-effects!
