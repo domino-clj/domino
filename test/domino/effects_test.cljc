@@ -1,21 +1,26 @@
 (ns domino.effects-test
   (:require
-    [domino.effects :as effects]
-    [domino.model :as model]
-    #?(:clj  [clojure.test :refer :all]
-       :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
+   [domino.effects :as effects]
+   [domino.core :as core]
+   [domino.model :as model]
+   #?(:clj  [clojure.test :refer :all]
+      :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 
 ;; TODO: Move effect logic to effects ns.
+;;       Test only effect logic
 
 (deftest effects-test
   (let [data (atom nil)]
-    (effects/execute-effects!
-      {:domino.core/change-history [[[:a] 1] [[:b] 1]]
-       :domino.core/db {:a 1 :b 1}
-       :domino.core/model (model/model->paths [[:a {:id :a}]
-                                               [:b {:id :b}]])
-       :domino.core/effects
-                       (effects/effects-by-paths
-                         [{:inputs [[:a]] :handler (fn [ctx inputs]
-                                                     (reset! data inputs))}])})
+    (is (= {::core/transaction-report {:status :complete
+                                       :changes [[::core/set-value :a 1]]
+                                       :triggered-effects
+                                       '(:my-effect)}}
+           (-> {:model [[:a {:id :a}]]
+                :effects [{:id :my-effect
+                           :inputs [:a]
+                           :handler (fn [{:keys [inputs]}]
+                                      (reset! data inputs))}]}
+               core/initialize
+               (core/transact [{:a 1}])
+               (select-keys [::core/transaction-report]))))
     (is (= {:a 1} @data))))

@@ -363,9 +363,10 @@
                                         ;;else
                                         (rollback! (assoc ctx' ::transaction-report {:status :failed
                                                                                      :reason ::unknown-error
+                                                                                     :message (ex-message ex)
                                                                                      :data (ex-data ex)})))))))))
            (post-tx
-             [{::keys [rx transaction-report] :as ctx}]
+             [{::keys [rx transaction-report event-history] :as ctx}]
              (let [fxs (if (= :complete (:status transaction-report))
                          (rx/get-reaction rx ::effects)
                          [])]
@@ -378,9 +379,14 @@
                 (-> ctx
                     (dissoc
                      ::db-hashes
-                     ::event-queue)
+                     ::event-queue
+                     ::event-history)
                     (assoc
-                     ::triggered-effects fxs)))))
+                     ::triggered-effects fxs)
+                    (update ::transaction-report
+                            #(cond-> %
+                               (seq fxs) (assoc :triggered-effects fxs)
+                               (seq event-history) (assoc :event-history event-history)))))))
            (tx-step
              [ctx changes]
              (handle-changes!
