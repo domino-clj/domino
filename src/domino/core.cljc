@@ -49,6 +49,8 @@
                         (get-in sub-context [::elements idx?])
                         sub-context)
             subctx-id (if collection? [id idx?] [id])
+            add-event-context (fn [subctx]
+                                (update subctx ::event-context merge (::event-context ctx)))
             tx-cb (fn [{child-v ::db
                         tx ::transaction-report
                         :as new-child-ctx}]
@@ -69,8 +71,8 @@
                                   (fnil assoc {}) subctx-id tx)
                           (resolve-changes-impl (rest changes) on-success on-fail))))]
         (if (nil? child-ctx)
-          (create-new-context-in-collection sub-context idx? #(transact % child-changes tx-cb))
-          (transact child-ctx child-changes tx-cb)))
+          (create-new-context-in-collection sub-context idx? #(transact (add-event-context %) child-changes tx-cb))
+          (transact (add-event-context child-ctx) child-changes tx-cb)))
 
       ::remove-child
       (let [[_ [id idx]] change]
@@ -304,7 +306,7 @@
                      {:schema (::schema ctx)
                       :async? (::async? ctx)}))
      (transact ctx user-changes identity)))
-  ([{db-pre ::db :as ctx-pre} user-changes cb]
+  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes cb]
    (letfn [(rollback!
              [ctx]
              (-> ctx-pre
@@ -322,20 +324,36 @@
                                   :hashes hashes
                                   ::db (get-db ctx)}))
                  (update ctx ::db-hashes (fnil conj #{}) h))))
-           (get-triggered-events
-             [{state ::rx  events ::events :as ctx}]
-             (let [triggered-evs (rx/get-reaction state ::events)]
-               (->> triggered-evs
-                    (remove
-                     (fn [ev]
-                       ;;TODO: drop events that should be ignored.
-                       false))
-                    not-empty)))
            (append-events-to-queue
-             [ctx]
-             (let [triggered (get-triggered-events ctx)]
+             [{state ::rx  events ::events hist ::event-history :as ctx}]
+             (let [triggered (rx/get-reaction state ::events)
+                   append-event-fn (fn [ev-q ev-id]
+                                     ;; TODO: handle event bubbling and pruning here
+                                     (let [{:keys [evaluation]
+                                            :as event}
+                                           (get events ev-id)]
+                                       (cond
+                                         (= :once evaluation)
+                                         (if (some #(= % ev-id) hist)
+                                           ;; Ignore if triggered
+                                           ev-q
+                                           ;; Otherwise, bubble to the end.
+                                           (conj
+                                            (into
+                                             events/empty-queue
+                                             (remove #(= % ev-id))
+                                             ev-q)
+                                            ev-id))
+
+                                         (and (not= :converge evaluation) (= (last hist) ev-id))
+                                         ;; Prevent immediate triggering of same event
+                                         ;; TODO: Throw?
+                                         ev-q
+
+                                         :else
+                                         (conj ev-q ev-id))))]
                (update ctx ::event-queue
-                       (fnil (partial reduce conj) events/empty-queue)
+                       (fnil (partial reduce append-event-fn) events/empty-queue)
                        triggered)))
            (handle-changes!
              [ctx changes post-cb]
@@ -463,7 +481,8 @@
                   (update ::rx rx/update-root
                           assoc
                           ::db-pre   db-pre
-                          ::db-start db-pre)) ;; Add db-pre for event triggering
+                          ::db-start db-pre
+                          ::ctx event-context)) ;; Add db-pre for event triggering
               user-changes))))                                        ;; Start tx with user driven changes.
 
 (defn model-map-merge [opts macc m]
@@ -499,6 +518,9 @@
 (def default-reactions [{:id ::db
                          :args ::rx/root
                          :fn ::db}
+                        {:id ::ctx
+                         :args ::rx/root
+                         :fn ::ctx}
                         {:id ::db-pre
                          :args ::rx/root
                          :fn ::db-pre}
@@ -617,6 +639,12 @@
   ;; TODO: support events that traverse context boundary
   ;; TODO: support ctx-args on rx
   (-> state
+      (cond->
+          (seq ctx-args) (rx/add-reaction! {:id [::ctx-args id]
+                                            :args ::ctx
+                                            :args-format :single
+                                            :fn (fn [ctx]
+                                                  (select-keys ctx ctx-args))}))
       (rx/add-reaction! {:id [::inputs id]
                          :args inputs
                          :args-format :rx-map
@@ -640,21 +668,17 @@
                          :args (mapv (partial conj [::pre]) outputs)
                          :args-format :rx-map
                          :fn identity})
-      (rx/add-reaction! {:id [::ctx-args id]
-                         :args ctx-args
-                         :args-format :rx-map
-                         :fn identity})
       (rx/add-reaction! {:id id
                          ::is-event? true
                          ::upstream (->> inputs
                                          (remove (set ignore-changes)))
                          ::downstream outputs
                          :lazy? true
-                         :args {:ctx-args [::ctx-args id]
-                                :inputs [::inputs id]
-                                :outputs [::outputs id]
-                                :inputs-pre [::inputs-pre id]
-                                :outputs-pre [::outputs-pre id]}
+                         :args (cond-> {:inputs [::inputs id]
+                                        :outputs [::outputs id]
+                                        :inputs-pre [::inputs-pre id]
+                                        :outputs-pre [::outputs-pre id]}
+                                 (seq ctx-args) (assoc :ctx-args [::ctx-args id]))
                          :args-format :map
                          :fn
                          (letfn [(drop-nils [m]
@@ -929,6 +953,7 @@
                             {:schema schema
                              :async? async?})))
           (-> ctx
+              (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
               (update ::rx rx/add-reactions! (into (::reactions ctx)
                                                    (parse-reactions schema)))
               (update ::rx add-conflicts-rx!)

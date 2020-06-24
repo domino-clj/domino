@@ -161,7 +161,8 @@
 
 (deftest same-input-as-output
   ;; TODO: Fix Event running logic
-  (test-events
+  (test-events-on-db
+   (dissoc default-db :a) ;;prevent eval on initialize
    [{:id :my-event
      :inputs  [:a]
      :outputs [:a]
@@ -176,14 +177,17 @@
 
 (deftest cyclic-inputs
   ;; TODO: Fix event running logic
-  (test-events
+  (test-events-on-db
+   (dissoc default-db :a) ;; Prevent events from running on initialize
    [{:id :first
+     :evaluation :once
      :inputs  [:a]
      :outputs [:b :c]
      :handler (fn [{{:keys [a]} :inputs
-                    {:keys [b c]} :outputs}]
+                    {:keys [b c] :or {b 0}} :outputs}]
                 {:b (inc b) :c c})}
     {:id :second
+     :evaluation :once
      :inputs  [:b]
      :outputs [:a]
      :handler (fn [{{:keys [b]} :inputs
@@ -198,12 +202,14 @@
                                 :event-history [:first :second]}})
   (test-events
    [{:id :first
+     :evaluation :once
      :inputs  [:a]
      :outputs [:b :c]
      :handler (fn [{{:keys [a]} :inputs
                     {:keys [b c]} :outputs}]
                 {:b (+ a b) :c c})}
     {:id :second
+     :evaluation :once
      :inputs  [:b]
      :outputs [:a]
      :handler (fn [{{:keys [b]} :inputs
@@ -220,100 +226,143 @@
 
 ;; TODO: rest of NS
 
-#_
+
 (deftest test-cascading-events
-  (test-graph-events
-    [{:inputs  [[:a]]
-      :outputs [[:b] [:c]]
-      :handler (fn [ctx {:keys [a]} {:keys [b c]}] {:b (+ a b) :c (+ a c)})}
-     {:inputs  [[:c]]
-      :outputs [[:d]]
-      :handler (fn [ctx {:keys [c]} _] {:d (inc c)})}]
-    [[[:a] 1] [[:b] 1]]
-    {::core/db             (assoc default-db :a 1 :b 2 :c 1 :d 2)
-     ::core/change-history [[[:a] 1]
-                            [[:b] 1]
-                            [[:b] 2]
-                            [[:c] 1]
-                            [[:d] 2]]}))
+  (test-events
+   [{:id :first
+     :inputs  [:a]
+     :outputs [:b :c]
+     :handler (fn [{{:keys [a]} :inputs {:keys [b c]} :outputs}]
+                {:b (+ a b) :c (+ a c)})}
+    {:id :second
+     :inputs  [:c]
+     :outputs [:d]
+     :handler (fn [{{:keys [c]} :inputs}]
+                {:d (inc c)})}]
+   [{:a 1 :b 1}]
+   {::core/db             (assoc default-db :a 1 :b 2 :c 1 :d 2)
+    ::core/transaction-report {:status :complete
+                               :changes
+                               [[::core/set-value :a 1]
+                                [::core/set-value :b 1]
+                                [::core/set-value :b 2]
+                                [::core/set-value :c 1]
+                                [::core/set-value :d 2]]
+                               :event-history [:first :second]}}))
 
-#_
+
 (deftest multi-input-event
-  (test-graph-events
-    [{:inputs  [[:a] [:b]]
-      :outputs [[:c]]
-      :handler (fn [ctx {:keys [a b]} {:keys [c]}] {:c (+ a b)})}]
-    [[[:a] 1] [[:b] 1]]
-    {::core/db             (assoc default-db :a 1 :b 1 :c 2)
-     ::core/change-history [[[:a] 1] [[:b] 1] [[:c] 2]]}))
+  (test-events
+   [{:id :ev
+     :inputs  [:a :b]
+     :outputs [:c]
+     :handler (fn [{{:keys [a b]} :inputs {:keys [c]} :outputs}] {:c (+ a b)})}]
+   [[:a 1] [:b 1]]
+   {::core/db             (assoc default-db :a 1 :b 1 :c 2)
+    ::core/transaction-report {:status :complete
+                               :changes [[::core/set-value :a 1]
+                                         [::core/set-value :b 1]
+                                         [::core/set-value :c 2]]
+                               :event-history [:ev]}}))
 
-#_
+
 (deftest multi-output-event
-  (test-graph-events
-    [{:inputs  [[:a]]
-      :outputs [[:b] [:c]]
-      :handler (fn [ctx {:keys [a]} {:keys [b c]}] {:b (+ a b) :c (inc c)})}]
-    [[[:a] 1]]
+  (test-events
+   [{:id :ev
+     :inputs  [:a]
+     :outputs [:b :c]
+     :handler (fn [{{:keys [a]} :inputs {:keys [b c]} :outputs}]
+                {:b (+ a b) :c (+ a c)})}]
+   [[:a 1]]
     {::core/db             (assoc default-db :a 1 :b 1 :c 1)
-     ::core/change-history [[[:a] 1] [[:b] 1] [[:c] 1]]}))
+     ::core/transaction-report {:status :complete
+                                :changes [[::core/set-value :a 1]
+                                          [::core/set-value :b 1]
+                                          [::core/set-value :c 1]]
+                                :event-history [:ev]}}))
 
-#_
 (deftest multi-input-output-event-omitted-unchanged-results
-  (test-graph-events
-    [{:inputs  [[:a] [:b]]
-      :outputs [[:c] [:d] [:e]]
-      :handler (fn [ctx {:keys [a b]} _] {:c (+ a b)})}]
-    [[[:a] 1] [[:b] 1]]
+  (test-events
+   [{:id :ev
+     :inputs  [:a :b]
+     :outputs [:c :d :e]
+     :handler (fn [{{:keys [a b]} :inputs}] {:c (+ a b)})}]
+    [[:a 1] [:b 1]]
     {::core/db             (assoc default-db :a 1 :b 1 :c 2)
-     ::core/change-history [[[:a] 1]
-                            [[:b] 1]
-                            [[:c] 2]]}))
+     ::core/transaction-report {:status :complete
+                                :changes [[::core/set-value :a 1]
+                                          [::core/set-value :b 1]
+                                          [::core/set-value :c 2]]
+                                :event-history [:ev]}}))
 
-#_
+
 (deftest multi-input-output-event
-  (test-graph-events
-    [{:inputs  [[:a] [:b]]
-      :outputs [[:c] [:d] [:e]]
-      :handler (fn [ctx {:keys [a b]} {:keys [d e]}] {:c (+ a b) :d d :e e})}]
-    [[[:a] 1] [[:b] 1]]
-    {::core/db             (assoc default-db :a 1 :c 2 :b 1)
-     ::core/change-history [[[:a] 1]
-                            [[:b] 1]
-                            [[:c] 2]]}))
+  (test-events
+   [{:id :ev
+     :inputs  [:a :b]
+     :outputs [:c :d :e]
+     :handler (fn [{{:keys [a b]} :inputs {:keys [d e]} :outputs}] {:c (+ a b) :d d :e e})}]
+   [[:a 1] [:b 1]]
+   {::core/db             (assoc default-db :a 1 :c 2 :b 1)
+    ::core/transaction-report {:status :complete
+                               :changes [[::core/set-value :a 1]
+                                         [::core/set-value :b 1]
+                                         [::core/set-value :c 2]]
+                               :event-history [:ev]}}))
 
-#_
+
 (deftest unrelated-events
-  (test-graph-events
-    [{:inputs  [[:a]]
-      :outputs [[:b]]
-      :handler (fn [ctx {:keys [a]} _] {:b (inc a)})}
-     {:inputs  [[:c]]
-      :outputs [[:d]]
-      :handler (fn [ctx {:keys [c]} _] {:d (dec c)})}]
-    [[[:a] 1]]
-    {::core/db             (assoc default-db :a 1 :b 2)
-     ::core/change-history [[[:a] 1] [[:b] 2]]}))
+  (test-events-on-db
+   (dissoc default-db :c)
+   [{:id :ev
+     :inputs  [:a]
+     :outputs [:b]
+     :handler (fn [{{:keys [a]} :inputs}] {:b (inc a)})}
+    {:id :THIS.SHOULD.NOT/RUN
+     :inputs  [:c]
+     :outputs [:d]
+     :handler (fn [{{:keys [c]} :inputs}] {:d (dec c)})}]
+   [[:a 1]]
+   {::core/db             (assoc (dissoc default-db :c) :a 1 :b 2)
+    ::core/transaction-report {:status :complete
+                               :changes [[::core/set-value :a 1]
+                                         [::core/set-value :b 2]]
+                               :event-history [:ev]}}))
 
-#_
+;; TODO: Improve context access pattern.
+;; TODO: Allow for initial event context on initialize.
 (deftest context-access
-  (test-graph-events
-    {:action #(+ % 5)}
-    default-db
-    [{:inputs  [[:a]]
-      :outputs [[:b]]
-      :handler (fn [ctx {:keys [a]} _] {:b ((:action ctx) a)})}]
-    [[[:a] 1]]
-    {::core/db             (assoc default-db :a 1 :b 6)
-     ::core/change-history [[[:a] 1] [[:b] 6]]}))
+  (is
+   (= {::core/db             (assoc default-db :a 1 :b 6)
+       ::core/transaction-report {:status :complete
+                                  :changes [[::core/set-value :a 1]
+                                            [::core/set-value :b 6]]
+                                  :event-history [:ev]}}
+      (->
+       test-schema
+       (assoc :events [{:id :ev
+                        :ctx-args [:action]
+                        :inputs  [:a]
+                        :outputs [:b]
+                        :handler (fn [{{:keys [a]} :inputs
+                                       {:keys [action]} :ctx-args}] {:b (action a)})}])
+       (core/initialize (dissoc default-db :a))
+       (update ::core/event-context (fnil assoc {}) :action #(+ % 5))
+       (core/transact [[:a 1]])
+       (select-keys [::core/db
+                     ::core/transaction-report])))))
 
-#_
 (deftest triggering-sub-path
-  (test-graph-events
-    [{:inputs  [[:h]]
-      :outputs [[:h]]
-      :handler (fn [ctx {h :h} {old-h :h}]
-                 {:h (update old-h :i + (:i h))})}]
-    [[[:h :i] 1]]                                           ;; [[[:h] {:i 2}]]
-    {::core/db             (assoc default-db :h {:i 2})
-     ::core/change-history [[[:h :i] 1]
-                            [[:h] {:i 2}]]}))
+  (test-events
+   [{:id :ev
+     :inputs  [:h]
+     :outputs [:h]
+     :evaluation :once
+     :handler (fn [{{h :h} :inputs {old-h :h} :outputs}]
+                {:h (update old-h :i + (:i h))})}]
+   [[:i 1]]                                           ;; [[[:h] {:i 2}]]
+   {::core/db             (assoc default-db :h {:i 2})
+    ::core/transaction-report {:changes [[::core/set-value :i 1]
+                                         [::core/set-value :h {:i 2}]]
+                               :event-history [:ev]
+                               :status :complete}}))
