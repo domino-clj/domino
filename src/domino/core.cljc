@@ -1010,7 +1010,7 @@
                              :async? async?})))
           (-> ctx
               (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
-              (update ::rx rx/add-reactions! (into (::reactions ctx)
+              (update ::rx rx/add-reactions! (into (::reactions ctx [])
                                                    (parse-reactions schema)))
               (update ::rx add-conflicts-rx!)
               (update ::rx add-event-rxns! (:events schema []))
