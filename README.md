@@ -12,6 +12,12 @@ Without a way to formalize the interactions between different parts of the appli
 
 Domino explicitly separates logic that makes changes to the data model from side effectful functions. Business logic functions in Domino explicitly declare how they interact with the data model by declaring their inputs and outputs. Domino then uses these declarations to build a graphs of related events. This approach handles cascading business logic out of the box, and provides a data specification for relationships in code. Once the changes are transacted, the effectful functions are called against the new state.
 
+## Version 0.4.0
+
+Version 0.4.0 is in pre-alpha and is not on the master branch.
+We do not recommend using it at this point (or even looking at it really).
+Please continue to use version 0.3.3 for the time being.
+
 ## Concepts
 
 Domino consists of three main concepts:
