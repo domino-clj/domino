@@ -1,8 +1,6 @@
 (ns domino.effects-test
   (:require
-   [domino.effects :as effects]
    [domino.core :as core]
-   [domino.model :as model]
    #?(:clj  [clojure.test :refer :all]
       :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])))
 

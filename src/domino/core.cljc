@@ -1,10 +1,5 @@
 (ns domino.core
   (:require
-   [domino.effects :as effects]
-   [domino.events :as events]
-   [domino.graph :as graph]
-   [domino.model :as model]
-   [domino.validation :as validation]
    [domino.util :as util :refer [dissoc-in]]
    [domino.rx :as rx]))
 
@@ -306,184 +301,234 @@
                      {:schema (::schema ctx)
                       :async? (::async? ctx)}))
      (transact ctx user-changes identity)))
-  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes cb]
-   (letfn [(rollback!
-             [ctx]
-             (-> ctx-pre
-                 (dissoc ::db-hashes
-                         ::event-queue)
-                 (assoc ::transaction-report (::transaction-report ctx))
-                 cb))
-           (append-db-hash!
-             [ctx]
-             (let [hashes (::db-hashes ctx #{})
-                   h (hash (get-db ctx))]
-               (if (hashes h)
-                 (throw (ex-info "Repeated DB state within transaction!"
-                                 {:id ::cyclic-transaction
-                                  :hashes hashes
-                                  ::db (get-db ctx)}))
-                 (update ctx ::db-hashes (fnil conj #{}) h))))
-           (append-events-to-queue
-             [{state ::rx  events ::events hist ::event-history :as ctx}]
-             (let [triggered (rx/get-reaction state ::events)
-                   append-event-fn (fn [ev-q ev-id]
-                                     ;; TODO: handle event bubbling and pruning here
-                                     (let [{:keys [evaluation]
-                                            :as event}
-                                           (get events ev-id)]
-                                       (cond
-                                         (= :once evaluation)
-                                         (if (some #(= % ev-id) hist)
-                                           ;; Ignore if triggered
+  ([{db-pre? ::db event-context ::event-context initialized? ::initialized? :as ctx-pre} user-changes cb]
+   ;; TODO: replace initialized? flag with `::core/set-db` change type
+   (let [db-pre (when initialized? db-pre?)]
+     (letfn [(rollback!
+               [ctx]
+               (-> ctx-pre
+                   (dissoc ::db-hashes
+                           ::event-queue)
+                   (assoc ::transaction-report (::transaction-report ctx))
+                   cb))
+             (append-db-hash!
+               [ctx]
+               (let [hashes (::db-hashes ctx #{})
+                     h (hash (get-db ctx))]
+                 (if (hashes h)
+                   (throw (ex-info "Repeated DB state within transaction!"
+                                   {:id ::cyclic-transaction
+                                    :hashes hashes
+                                    ::db (get-db ctx)}))
+                   (update ctx ::db-hashes (fnil conj #{}) h))))
+             (append-events-to-queue
+               [{state ::rx  events ::events hist ::event-history :as ctx}]
+               (let [triggered (rx/get-reaction state ::events)
+                     append-event-fn (fn [ev-q ev-id]
+                                       ;; TODO: handle event bubbling and pruning here
+                                       (let [{:keys [evaluation
+                                                     exclusions
+                                                     ignore-events]
+                                              :or {exclusions #{}
+                                                   ignore-events #{}
+                                                   evaluation :converge-weak}
+                                              :as event}
+                                             (get events ev-id)]
+                                         #_(println
+                                          "Appending..." ev-id
+                                          "to " ev-q "? (" triggered ")"
+                                          (or
+                                           ;; Prevent self-triggering
+                                           (and
+                                            (and (= :converge-weak evaluation) (= (last hist) ev-id))
+                                            1)
+                                           ;; Prevent ignore-events triggering
+                                           (and
+                                            (contains? ignore-events (last hist))
+                                            2)
+                                           ;; Prevent exclusions in queue
+                                           (and
+                                            (some (partial contains? exclusions) ev-q)
+                                            3)
+                                           ;; Prevent exclusions or self in history
+                                           (and
+                                            (some #(or (exclusions %) (= ev-id %)) hist)
+                                            4)
+                                           ;; Prevent :first when already in queue
+                                           (and
+                                            (and (= :first evaluation) (some #(= ev-id %) ev-q))
+                                            5)
+                                           "FALSE"))
+                                         (cond
+                                           ;; Prune event cases.
+                                           (or
+                                            ;; Prevent self-triggering
+                                            (and (= :converge-weak evaluation) (= (last hist) ev-id))
+                                            ;; Prevent ignore-events triggering
+                                            (contains? ignore-events (last hist))
+                                            ;; Prevent exclusions in queue
+                                            (some (partial contains? exclusions) ev-q)
+                                            ;; Prevent exclusions or self in history
+                                            (some #(or (exclusions %) (= ev-id %)) hist)
+                                            ;; Prevent :first when already in queue
+                                            (and (= :first evaluation) (some #(= ev-id %) ev-q)))
                                            ev-q
-                                           ;; Otherwise, bubble to the end.
+
+                                           ;; Bubble :once instead of standard triggering behaviour.
+                                           (= :once evaluation)
                                            (conj
                                             (into
-                                             events/empty-queue
+                                             util/empty-queue
                                              (remove #(= % ev-id))
                                              ev-q)
-                                            ev-id))
+                                            ev-id)
 
-                                         (and (not= :converge evaluation) (= (last hist) ev-id))
-                                         ;; Prevent immediate triggering of same event
-                                         ;; TODO: Throw?
-                                         ev-q
-
-                                         :else
-                                         (conj ev-q ev-id))))]
-               (update ctx ::event-queue
-                       (fnil (partial reduce append-event-fn) events/empty-queue)
-                       triggered)))
-           (handle-changes!
-             [ctx changes post-cb]
-             (resolve-changes ctx changes
-                              (fn [{::keys [db transaction-report] :as ctx'}]
-                                (if (= :failed (:status transaction-report))
-                                  (rollback! ctx')
-                                  (try
-                                    (-> ctx'
-                                        (update ::rx rx/update-root
-                                                (fn [{db-pre ::db :as root}]
-                                                  (assoc root
-                                                         ::db db
-                                                         ::db-pre db-pre)))
-                                        (append-events-to-queue)
-                                        append-db-hash!
-                                        post-cb)
-                                    (catch #?(:clj Exception
-                                              :cljs js/Error) ex
-                                      (case (:id (ex-data ex))
-                                        ::cyclic-transaction
-                                        (rollback! (assoc ctx' ::transaction-report {:status :failed
-                                                                                     :reason ::cyclic-transaction
-                                                                                     :data (ex-data ex)}))
-                                        ;;else
-                                        (rollback! (assoc ctx' ::transaction-report {:status :failed
-                                                                                     :reason ::unknown-error
-                                                                                     :message (ex-message ex)
-                                                                                     :data (ex-data ex)})))))))))
-           (post-tx
-             [{::keys [rx transaction-report event-history] :as ctx}]
-             (let [fxs (if (= :complete (:status transaction-report))
-                         (rx/get-reaction rx ::effects)
-                         [])]
-               (doseq [fx fxs
-                       :let
-                       [run-fx! (rx/get-reaction rx fx)]]
-                 ;; Evaluate each effect fn
-                 (when (fn? run-fx!) (run-fx!)))
-               (cb
-                (-> ctx
-                    (dissoc
-                     ::db-hashes
-                     ::event-queue
-                     ::event-history)
-                    (assoc
-                     ::triggered-effects fxs)
-                    (update ::transaction-report
-                            #(cond-> %
-                               (seq fxs) (assoc :triggered-effects fxs)
-                               (seq event-history) (assoc :event-history event-history)))))))
-           (tx-step
-             [ctx changes]
+                                           ;; Default event triggered behaviour
+                                           :else
+                                           (conj ev-q ev-id))))]
+                 (update ctx ::event-queue
+                         (fnil (partial reduce append-event-fn) util/empty-queue)
+                         triggered)))
              (handle-changes!
-              ctx changes
-              (fn [{state ::rx
-                    db    ::db
-                    ev-q  ::event-queue
-                    tx-report ::transaction-report
-                    :as ctx}]
-                (let [;; 2. Identify any conflicts that have arisen.
-                      {::keys [unresolvable resolvers]
-                       :as conflicts}
-                      (rx/get-reaction state ::conflicts)]
-                  ;; TODO: decide if this is guaranteed to halt, and either amend it so that it is, or add a timeout.
-                  ;;       if a timeout is added, add some telemetry to see where cycles arise.
-                  (cond
-                    (= :failed (:status tx-report))
-                    (rollback! ctx)
+               [ctx changes post-cb]
+               (resolve-changes ctx changes
+                                (fn [{::keys [db transaction-report] :as ctx'}]
+                                  (if (= :failed (:status transaction-report))
+                                    (rollback! ctx')
+                                    (try
+                                      (-> ctx'
+                                          (update ::rx rx/update-root
+                                                  (fn [{db-pre ::db :as root}]
+                                                    (assoc root
+                                                           ::db db
+                                                           ::db-pre db-pre)))
+                                          (append-events-to-queue)
+                                          append-db-hash!
+                                          post-cb)
+                                      (catch #?(:clj Exception
+                                                :cljs js/Error) ex
+                                        (case (:id (ex-data ex))
+                                          ::cyclic-transaction
+                                          (rollback! (assoc ctx' ::transaction-report
+                                                             {:status :failed
+                                                              :reason ::cyclic-transaction
+                                                              :data (ex-data ex)}))
+                                          ;;else
+                                          (rollback! (assoc ctx' ::transaction-report
+                                                             {:status :failed
+                                                              :reason ::unknown-error
+                                                              :message (ex-message ex)
+                                                              :data (ex-data ex)
+                                                              :error
+                                                              ex})))))))))
+             (post-tx
+               [{::keys [rx transaction-report event-history] :as ctx}]
+               (let [fxs (if (= :complete (:status transaction-report))
+                           (rx/get-reaction rx ::effects)
+                           [])]
+                 (doseq [fx fxs
+                         :let
+                         [run-fx! (rx/get-reaction rx fx)]]
+                   ;; Evaluate each effect fn
+                   (when (fn? run-fx!) (run-fx!)))
+                 (cb
+                  (-> ctx
+                      (dissoc
+                       ::db-hashes
+                       ::event-queue
+                       ::event-history)
+                      (assoc
+                       ::triggered-effects fxs)
+                      (update ::transaction-report
+                              #(cond-> %
+                                 (seq fxs) (assoc :triggered-effects fxs)
+                                 (seq event-history) (assoc :event-history event-history)))))))
+             (tx-step
+               [ctx changes]
+               (handle-changes!
+                ctx changes
+                (fn [{state ::rx
+                      db    ::db
+                      ev-q  ::event-queue
+                      tx-report ::transaction-report
+                      :as ctx}]
+                  (let [;; 2. Identify any conflicts that have arisen.
+                        {::keys [unresolvable resolvers]
+                         :as conflicts}
+                        (rx/get-reaction state ::conflicts)]
+                    ;; TODO: decide if this is guaranteed to halt, and either amend it so that it is, or add a timeout.
+                    ;;       if a timeout is added, add some telemetry to see where cycles arise.
+                    (cond
+                      (= :failed (:status tx-report))
+                      (rollback! ctx)
 
-                    (and (empty? conflicts) (empty? ev-q))
-                    (do
-                      (post-tx ctx))
+                      (and (empty? conflicts) (empty? ev-q))
+                      (do
+                        (post-tx ctx))
 
-                    (not-empty unresolvable)
-                    (rollback! (assoc ctx
-                                      ::transaction-report
-                                      {:status :failed
-                                       :reason ::unresolvable-constraint
-                                       :data
-                                       {:unresolvable unresolvable
-                                        :conflicts conflicts}}))
+                      (not-empty unresolvable)
+                      (rollback! (update ctx ::transaction-report
+                                         merge
+                                         {:status :failed
+                                          :reason ::unresolvable-constraint
+                                          :data
+                                          {:unresolvable unresolvable
+                                           :conflicts conflicts}}))
 
-                    ;; TODO: Ensure that resolvers can operate in parallel
-                    (not-empty resolvers)
-                    (let [resolver-ids (vals resolvers)
-                          {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
-                          changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
-                      (tx-step ctx changes))
+                      ;; TODO: Ensure that resolvers can operate in parallel
+                      (not-empty resolvers)
+                      (let [resolver-ids (vals resolvers)
+                            {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
+                            changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
+                        (tx-step ctx changes))
 
-                    (not-empty conflicts)
-                    (rollback! (assoc ctx ::transaction-report
-                                      {:status :failed
-                                       :reason ::invalid-conflicts
-                                       :data {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
-                                              :conflicts conflicts
-                                              :reaction-definition (get state ::conflicts)}}))
+                      (not-empty conflicts)
+                      (rollback! (update ctx ::transaction-report
+                                         merge
+                                         {:status :failed
+                                          :reason ::invalid-conflicts
+                                          :data {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
+                                                 :conflicts conflicts
+                                                 :reaction-definition (get state ::conflicts)}}))
 
-                    :else
-                    (letfn [(trigger-event [q c]
-                              (tx-step (-> ctx
-                                           (assoc ::event-queue (pop q))
-                                           (update ::event-history (fnil conj []) (peek q)))
-                                       [c]))
-                            ;; Pass state rx-map to allow use of `compute-reaction` for caching
-                            (run-next-event [state q]
-                              (if (empty? q)
-                                (post-tx ctx)
-                                (let [ev-id (peek q)
-                                      state (rx/compute-reaction state ev-id)
-                                      c (rx/get-reaction state ev-id)]
-                                  (cond
-                                    (nil? c)
-                                    (recur state (pop q))
-                                    (fn? c)
-                                    (c (fn [r]
-                                         (if (nil? r)
-                                           (run-next-event state (pop q))
-                                           (trigger-event q r))))
-                                    :else
-                                    (trigger-event q c)))))]
-                      (run-next-event state ev-q)))))))]
-     (tx-step (-> ctx-pre
-                  (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
-                  (update ::rx rx/update-root
-                          assoc
-                          ::db-pre   db-pre
-                          ::db-start db-pre
-                          ::ctx event-context)) ;; Add db-pre for event triggering
-              user-changes))))                                        ;; Start tx with user driven changes.
+                      :else
+                      (letfn [(trigger-event [q c]
+                                (tx-step (-> ctx
+                                             (assoc ::event-queue (pop q))
+                                             (update ::event-history (fnil conj []) (peek q)))
+                                         [c]))
+                              ;; Pass state rx-map to allow use of `compute-reaction` for caching
+                              (run-next-event [state q]
+                                (if (empty? q)
+                                  (post-tx ctx)
+                                  (let [ev-id (peek q)
+                                        state (rx/compute-reaction state ev-id)
+                                        c (rx/get-reaction state ev-id)]
+                                    #_(println "ev-id: " ev-id "Result: " c)
+                                    (cond
+                                      (nil? c)
+                                      (recur state (pop q))
+                                      (fn? c)
+                                      (c (fn [r]
+                                           (if (nil? r)
+                                             (run-next-event state (pop q))
+                                             (trigger-event q r))))
+                                      :else
+                                      (trigger-event q c)))))]
+                        #_(println "Events..." ev-q )
+                        (run-next-event state ev-q)))))))]
+       #_(println "Transacting... " (::db ctx-pre) "Changes..." user-changes)
+       (tx-step (-> ctx-pre
+                    (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
+                    (cond->
+                        (not initialized?) append-events-to-queue)
+                    (assoc ::initialized? true)
+                    (update ::rx rx/update-root
+                            assoc
+                            ::db-pre   db-pre
+                            ::db-start db-pre
+                            ::ctx event-context)) ;; Add db-pre for event triggering
+                user-changes)))))                                        ;; Start tx with user driven changes.
 
 (defn model-map-merge [opts macc m]
   ;; TODO: custom merge behaviour for privileged keys.
@@ -725,8 +770,14 @@
                             (not-empty
                              (filter some? evs)))})))
 
-(defn add-outgoing-effect-to-state! [state {:keys [id inputs handler] :as effect}]
+(defn add-outgoing-effect-to-state! [state {:keys [id inputs ctx-args handler] :as effect}]
   (-> state
+      (cond->
+          (seq ctx-args) (rx/add-reaction! {:id [::ctx-args id]
+                                            :args ::ctx
+                                            :args-format :single
+                                            :fn (fn [ctx]
+                                                  (select-keys ctx ctx-args))}))
       (rx/add-reaction! {:id [::inputs id]
                          :args inputs
                          :args-format :rx-map
@@ -740,12 +791,15 @@
       (rx/add-reaction! {:id id
                          ::is-effect? true
                          :lazy? true
-                         :args {:inputs [::inputs id]}
+                         :args (cond->
+                                   {:inputs [::inputs id]}
+                                 (seq ctx-args) (assoc :ctx-args [::ctx-args id]))
                          :args-format :map
                          :fn
-                         (fn [{:keys [inputs]}]
+                         (fn [{:keys [inputs ctx-args]}]
                            (fn []
-                             (handler {:inputs inputs})))})))
+                             (handler {:inputs inputs
+                                       :ctx-args ctx-args})))})))
 
 (defn add-incoming-effect-to-state! [state {:keys [id outputs handler] :as effect}]
   (-> state
@@ -922,7 +976,7 @@
      ::downstream-deep (deep-relationships (::downstream ctx')))))
 
 (defn add-default-id [m]
-  (update m :id #(or % (util/random-uuid))))
+  (update m :id #(or % (keyword "UUID" (str (util/random-uuid))))))
 
 (defn normalize-schema [schema]
   (-> schema
@@ -938,14 +992,16 @@
      (initialize schema cb-or-db nil)
      (initialize schema {} cb-or-db)))
   ([schema initial-db cb]
+   #_(println "Initializing...")
    (try
      (let [schema (normalize-schema schema)
            fields (walk-model (:model schema) {})]
        (add-fields-to-ctx
         {::db initial-db
-         ::rx (rx/create-reactive-map initial-db)
+         ::rx (rx/create-reactive-map {::db initial-db})
          ::schema schema
-         ::async? (schema-is-async? schema)}
+         ::async? (schema-is-async? schema)
+         ::event-context (:event-context schema)}
         fields
         (fn [{::keys [async?] :as ctx}]
           (when (and async? (nil? cb))
@@ -960,8 +1016,6 @@
               (update ::rx add-event-rxns! (:events schema []))
               (update ::rx add-effect-rxns! (:effects schema []))
               (compute-relationships)
-              ;; NOTE: this transact will not trigger events!
-              ;;       does this need to be changed?
               (transact [] (or cb identity))))))
      (catch #?(:clj Throwable
                :cljs js/Error) e
@@ -993,116 +1047,3 @@
   [ctx id]
   ;; TODO: Implement selection from subcontexts.
   )
-
-;; EVENTS
-
-
-;; General process
-;; 1. Aggregate all things which changed in rx-map
-;; 2. Based on changed things, find all triggered events
-;; 3. Place events into a queue
-;; 4. Take an event off of the queue, and compute it's resulting changeset
-;; 5. Place any events triggered onto the queue (at the end)
-;; 6. Repeat until event queue is consumed
-
-;; Notes
-;; - Configure event-specific behaviours (e.g. how many times in a tx can it be triggered?)
-;; - Allow for rxns to non-db values (e.g. db-pre, ctx, etc...)
-;; - Allow for writes to an ephemeral db for intermediate values
-
-;; RELATIONSHIPS
-
-;; - Aggregate relatedness from constraints and events at compile time
-;; - Consider tracking metadata about 'why' things are related, if only for debugging
-;; - Consider future ability to draw graph of relationships
-
-;; ==============================================================================
-;; TODO
-;; - DONE Prevent empty subcontexts from generating a map.
-;; - TODO Support cross-context paths for non-collection subcontexts
-;; - Add relatedness fns
-;; - DONE Add event-style rules
-;; - Add computation/derivation-style rules
-;; - Add intermediate-value rules
-;; - Ensure as much feature parity as possible
-;; - Establish future enhancment paths (i.e. cross-context rules)
-;; - Connect/rewrite tests as neccessary
-;; - Tidy namespaces and add/update documentation
-
-
-;; ==============================================================================
-;; OLD VERSION
-;; ==============================================================================
-
-(comment
-
-  #?(:clj
-     (defmacro event [[_ in out :as args] & body]
-       (let [in-ks#  (mapv keyword (:keys in))
-             out-ks# (mapv keyword (:keys out))]
-         {:inputs  in-ks#
-          :outputs out-ks#
-          :handler `(fn ~(vec args) ~@body)})))
-
-  (defn transact-old
-    "Take the context and the changes which are an ordered collection of changes
-
-  Assumes all changes are associative changes (i.e. vectors or hashmaps)"
-    [ctx changes]
-    (let [updated-ctx (events/execute-events ctx changes)]
-      (effects/execute-effects! updated-ctx)
-      updated-ctx))
-
-  (defn initial-transaction-old
-    "If initial-db is not empty, transact with initial db as changes"
-    [{::keys [model] :as ctx} initial-db]
-    (if (empty? initial-db)
-      ctx
-      (transact-old ctx
-                    (reduce
-                     (fn [inputs [_ path]]
-                       (if-some [v (get-in initial-db path)]
-                         (conj inputs [path v])
-                         inputs))
-                     []
-                     (:id->path model)))))
-
-  (defn initialize-old
-    "Takes a schema of :model, :events, and :effects
-
-  1. Parse the model
-  2. Inject paths into events
-  3. Generate the events graph
-  4. Reset the local ctx and return value
-
-  ctx is a map of:
-    ::model => a map of model keys to paths
-    ::events => a vector of events with pure functions that transform the state
-    ::effects => a vector of effects with functions that produce external effects
-    ::state => the state of actual working data
-    "
-    ([schema]
-     (initialize-old schema {}))
-    ([{:keys [model effects events] :as schema} initial-db]
-     ;; Validate schema
-     (validation/maybe-throw-exception (validation/validate-schema schema))
-     ;; Construct ctx
-     (let [model  (model/model->paths model)
-           ;; TODO: Generate trivial events for all paths with `:pre` or `:post` and no event associated.
-           events (model/connect-events model events)]
-       (initial-transaction-old
-        {::model         model
-         ::events        events
-         ::events-by-id  (util/map-by-id events)
-         ::effects       (effects/effects-by-paths (model/connect-effects model effects))
-         ::effects-by-id (util/map-by-id effects)
-         ::db            initial-db
-         ::graph         (graph/gen-ev-graph events)}
-        initial-db))))
-
-  (defn trigger-effects-old
-    "Triggers effects by ids as opposed to data changes
-
-  Accepts the context, and a collection of effect ids"
-    [ctx effect-ids]
-    (transact-old ctx (effects/effect-outputs-as-changes ctx effect-ids))))

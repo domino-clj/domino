@@ -2,6 +2,15 @@
   #?(:cljs (:refer-clojure :exclude [random-uuid]))
   #?(:clj (:import java.util.UUID)))
 
+(def empty-queue
+  #?(:clj  clojure.lang.PersistentQueue/EMPTY
+     :cljs cljs.core/PersistentQueue.EMPTY))
+
+#?(:clj
+   (defmethod clojure.core/print-method clojure.lang.PersistentQueue
+     [queue writer]
+     (.write writer (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
+
 (defn generate-sub-paths
   "Given a `path`, generate a list of all sub-paths including `path`"
   [path]

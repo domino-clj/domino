@@ -2,9 +2,6 @@
   (:require
     #?(:clj  [clojure.test :refer :all]
        :cljs [cljs.test :refer-macros [is are deftest testing use-fixtures]])
-    [domino.graph :as graph]
-    [domino.events :as events]
-    [domino.model :as model]
     [domino.core :as core]))
 
 
@@ -35,7 +32,15 @@
        (core/initialize db)
        (core/transact changes)
        (select-keys [::core/db
-                     ::core/transaction-report])))))
+                     ::core/transaction-report])
+       (update ::core/transaction-report
+               select-keys
+               [:status
+                :changes
+                :event-history
+                :reason
+                :message
+                :data])))))
 
 (def test-events (partial test-events-on-db default-db))
 
@@ -160,7 +165,6 @@
                                :changes [[::core/set-value :a 0]]}}))
 
 (deftest same-input-as-output
-  ;; TODO: Fix Event running logic
   (test-events-on-db
    (dissoc default-db :a) ;;prevent eval on initialize
    [{:id :my-event
@@ -176,9 +180,8 @@
 
 
 (deftest cyclic-inputs
-  ;; TODO: Fix event running logic
   (test-events-on-db
-   (dissoc default-db :a) ;; Prevent events from running on initialize
+   (dissoc default-db :a :b) ;; Prevent events from running on initialize
    [{:id :first
      :evaluation :once
      :inputs  [:a]
@@ -194,12 +197,12 @@
                     {:keys [a]} :outputs}]
                 {:a (inc a)})}]
    [[:a 1]]
-    {::core/db             (assoc default-db :b 1 :a 2)
-     ::core/transaction-report {:status :complete
-                                :changes [[::core/set-value :a 1]
-                                          [::core/set-value :b 1]
-                                          [::core/set-value :a 2]]
-                                :event-history [:first :second]}})
+   {::core/db             (assoc default-db :b 1 :a 2)
+    ::core/transaction-report {:status :complete
+                               :changes [[::core/set-value :a 1]
+                                         [::core/set-value :b 1]
+                                         [::core/set-value :a 2]]
+                               :event-history [:first :second]}})
   (test-events
    [{:id :first
      :evaluation :once
@@ -216,16 +219,13 @@
                     {:keys [a]} :outputs}]
                 {:a (+ b a)})}]
    [[:a 1] [:b 2]]
-    {::core/db             (assoc default-db :b 3 :a 4)
-     ::core/transaction-report {:status :complete
-                                :changes [[::core/set-value :a 1]
-                                          [::core/set-value :b 2]
-                                          [::core/set-value :b 3]
-                                          [::core/set-value :a 4]]
-                                :event-history [:first :second]}}))
-
-;; TODO: rest of NS
-
+   {::core/db             (assoc default-db :b 3 :a 4)
+    ::core/transaction-report {:status :complete
+                               :changes [[::core/set-value :a 1]
+                                         [::core/set-value :b 2]
+                                         [::core/set-value :b 3]
+                                         [::core/set-value :a 4]]
+                               :event-history [:first :second]}}))
 
 (deftest test-cascading-events
   (test-events
@@ -366,3 +366,5 @@
                                          [::core/set-value :h {:i 2}]]
                                :event-history [:ev]
                                :status :complete}}))
+
+;; TODO: Events across context boundaries

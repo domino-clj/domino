@@ -12,6 +12,114 @@ Without a way to formalize the interactions between different parts of the appli
 
 Domino explicitly separates logic that makes changes to the data model from side effectful functions. Business logic functions in Domino explicitly declare how they interact with the data model by declaring their inputs and outputs. Domino then uses these declarations to build a graphs of related events. This approach handles cascading business logic out of the box, and provides a data specification for relationships in code. Once the changes are transacted, the effectful functions are called against the new state.
 
+## 0.4.0-pre-alpha.1
+
+There are a number of sweeping changes coming to Domino.
+For the time being, please continue using 0.3.3. The API of 0.4.0 is rough, and subject to change.
+The implementation is very messy, slow, and in need of a *lot* of work.
+
+Please note that interceptors will be deprecated in 0.4.0.
+
+Also, please see 0.3.3 documentation below.
+
+### New Features
+
+Event handler signature
+> Instead of passing the whole context, we've updated event handlers to accept a single map with the keys `:inputs` `:inputs-pre` `:outputs` `:outputs-pre` and `:ctx-args`.
+> Additionally, `:ctx-args` must be declared explicitly.
+> For now, `:ctx-args` are keys from the map `:domino.core/event-context`, but arbitrary access to the global context may be supported eventually.
+> It seems safer to constrain the areas which events can depend on, but access to the global context will be added if neccessary.
+
+Event evaluation strategy
+> Events now evaluate with different strategies depending on use case.
+> e.g. `:converge` events will always be triggered, and thus must eventually reach a fixed-point.
+> e.g. `:first` events will be triggered once, and will only be evaluated the first time they are triggered.
+> e.g. `:once` events will be triggered once as well, but any subsequent triggers while it is queued will push it to the back of the queue.
+
+Event ignore-events
+> Events can specify other events to ignore.
+> e.g. you can have a pair of events, one which converts pounds to kilograms, and one which converts kilograms to pounds. If they specify each other in their `:ignore-events` sets, they will not cause each other to run.
+
+Event exclusions
+> Events can specify other events as exclusions.
+> This means that if there is an exclusion in the queue or the history, the event will not be triggered in the remainder of the transaction.
+
+Event ignore-changes
+> Events can specify inputs whose changes don't cause it to trigger.
+> This allows you to specify inputs which more like parameters.
+
+Event should-run
+> This is a predicate which is run with the same arguments as the handler, but will prevent the handler from running if it returns false.
+> This is especially useful for long-running async events, where you can perform a quick synchronous computation to prevent an expensive async call.
+
+Async first, and fixed async
+> prior to 0.4.0, async required the event handler to block until the callback was called, otherwise, the return value would be treated as the event result. In order to fix this, sweeping changes were required, and there is a lot of callback mess, but it works as expected now. Still, if `identity` is used as a callback, and there are no async events, domino will work as before. The core functions will fallback to this behaviour if no top-level callback is provided, but will error if there is an async event.
+> However, the callbacks are complex, and the call stack is quite deep. This has performance implications.
+
+Model Attributes
+> The model is now walked in a similar manner to a reitit router. It will eventually support a similar pattern of attribute inheritance/merging.
+> Ideally this will allow users to provide custom modules such as coercion/validation constraint generation.
+> At this point, this is just a scaffold, but this seems to be one of the main ways to make domino extensible.
+
+Subcontexts
+> Subcontexts are a way of nesting domino schemas.
+> They allow you to specify a child context at a path, or more interestingly, a collection of children contexts at a path.
+> This allows for form sections to be composed into a larger workflow, while isolating logic of component parts.
+
+`Change` types
+> We've added four fundamental change types: `:domino.core/set-value`, `:domino.core/remove-value`, `:domino.core/update-child`, and `:domino.core/remove-child`
+> The first two are for operating on the current context by id, and operate as you would expect. See docs for details.
+> `:domino.core/update-child` passes a changelist to a child context, which will manage its own transaction.
+> `:domino.core/remove-child` removes a child context and cleans up any computed values.
+
+`Change` parsing
+> In addition to change types, there is a change parsing step that transforms incoming changes into the four fundamental types above.
+> We've included a default custom type - `:domino.core/set` which takes a map of id to value, and unrolls it into `:domino.core/set-value` and `:domino.core/remove-value` changes for each key-value pair. It also supports nesting for referencing subcontexts.
+> If there is a `:domino.core/custom-change-fns` map on the domino context, it will use the first key in the change vector to look up a parsing function
+> Also, we support implicit change types if a leading keyword isn't a recognized change type.
+> e.g. `[:foo "FOO"]` -> `[:domino.core/set-value :foo "FOO"]`
+> e.g. `{:foo "FOO" :bar nil}` -> `[:domino.core/set {:foo "FOO" :bar nil}]` -> `[[:domino.core/set-value :foo "FOO"] [:domino.core/remove-value :bar]]`
+> e.g. `[[:a :b :c] "Foo"]` -> `[:domino.core/update-child :a [:domino.core/update-child :b [:domino.core/set-value :c "Foo"]]]`
+
+Constraints
+> Constraints are a special type of event which don't have inputs and outputs, but rather a query and a predicate.
+> The predicate must return true, otherwise the transaction will fail.
+> Constraints may also provide a resolver fn, which will attempt to coerce the values in the query in order to pass the constraint.
+> For example, a constraint may require a number to be within certain bounds, and could have a resolver which sets an invalid value to the ceiling or floor.
+
+Transaction Report
+> We've extended the `:domino.core/change-history` to the larger notion of a transaction report.
+> This will include information about successful and failed transactions, including change history, status, error information, event order, etc.
+> This will also be extended to include things like effects triggered, relevant ctx keys, etc.
+> Note that change history will no longer be path-value, but will be a vector changes of the fundamental change types above.
+
+domino.rx
+> This is a somewhat failed experiment in capturing a reactive model without state or ratoms or the like.
+> this will be reworked or replaced before 0.4.0 is released.
+
+#### Coming Soon
+
+- Separate `initialize`, `transact`, `trigger-effects` synchronous implementations from asynchronous ones. (of course while still maximizing code reuse.) Improve performance for both, but especially synchronous impl.
+- Refactoring and cleanup of immense and messy `domino.core` namespace, pulling out new implementation into relevant namespaces and exposing useful component fns.
+- Refactoring `initialize` and `transact` to allow for clearer initial transaction and avoid having a flag.
+- Events which are dependent on values in child contexts or have values in child contexts as outputs
+- Events which take values from the parent context (probably shouldn't feed out to the parent context except maybe via effect.)
+- Intermediate computed values which aren't stored in the DB, but can be used from events, constraints, and effects. (similar to re-frame subscriptions. will reduce repetition and improve efficiency)
+- Ephemeral required values to be passed in on each transaction. (e.g. user/session/timestamp etc.)
+- Expansion and extensibility of model inheritance.
+- Intercepting subcontext effects by parent contexts.
+- `domino.core/select` fn which will handle parsing of ids and deferral of selection to subcontexts, as well as using default values and other utilities from the model (e.g. canonical ordering of children, searching/filtering of children, etc.).
+- Change of type `:domino.core/set-db` for initialization. (Although possible to use in transact, not recommended!)
+- Change of type `:domino.core/set-at-path` for pathwise changes. (will not be recommended for use unless absolutely neccessary.)
+- Enhanced transaction failure reporting, especially for constraints and events.
+- Resiliency options for events and effects (e.g. what to do if they throw)
+- Add better error reporting in transaction report for constraint/event/effect failures
+- Ability to specify `:event-context` for initialize's `transact` step.
+- Inheritance rules for passing/merging `:event-context` to children, if it is useful for children can have their own event contexts.
+- Enhancement of queries, esp. on subcontexts. Currently, collection subcontexts must include the child ID on the ID vector (e.g. [:patient "1234123" :birthdate])
+- Updating readme, docs, and examples to reflect 0.4.0
+- Sweeping optimizations, likely including the reworking/replacement of the `domino.rx` namespace
+
 ## Concepts
 
 Domino consists of three main concepts:

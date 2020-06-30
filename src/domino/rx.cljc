@@ -9,6 +9,8 @@
 ;; reactions from changed pieces of state. It will run any reactions with changed
 ;; inputs exactly once.
 ;;
+;; NOTE: a lot of the comments in this namespace are scratch notes or old.
+;;       please disregard most or all of them.
 ;; ==============================================================================
 
 ;; TODO: Enforce reaction shape to allow pattern matching for various operations!
