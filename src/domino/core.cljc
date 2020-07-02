@@ -535,8 +535,11 @@
   ;;       Possibly also provide a multimethod to allow custom merge beh'r for user specified keys.
   (merge macc m))
 
-(defn clean-macc [opts m]
-  (select-keys m (into [] (:inherited-keys opts))))
+(defn clean-macc [opts {:keys [id] :as m}]
+  (-> m
+      (select-keys (into [] (:inherited-keys opts)))
+      (cond->
+          (some? id) (update :parents (fnil conj #{}) id))))
 
 (defn walk-model
     [raw-model {:as opts}]
@@ -851,10 +854,11 @@
 (defn add-fields-to-ctx [{::keys [db] :as ctx} [field :as fields] on-complete]
   (if (empty? fields)
     (on-complete ctx)
-    (let [[id {::keys [path] :keys [collection? schema index-id] :as m}] field
+    (let [[id {::keys [path] :keys [collection? parents schema index-id] :as m}] field
           ctx (cond-> ctx
                 (not-empty m) (update ::id->opts (fnil assoc {}) id m)
                 path (->
+                      (update ::id->parents (fnil assoc {}) id (or parents #{}))
                       (update ::id->path (fnil assoc {}) id path)
                       (update ::reactions (fnil into []) [{:id id
                                                            :args ::db
