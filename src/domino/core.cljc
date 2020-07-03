@@ -1048,6 +1048,24 @@
              (or cb identity))))
 
 (defn select
-  [ctx id]
+  [{::keys [subcontexts rx db] :as ctx} id]
   ;; TODO: Implement selection from subcontexts.
-  )
+  (cond
+    (or (nil? id) (and (coll? id) (empty? id)))
+    db
+
+    (empty? ctx)
+    nil
+
+    (and (keyword? id) (contains? rx id))
+    (rx/get-reaction rx id)
+
+    (vector? id)
+    (if-some [{::keys [collection? elements] :as sub} (get subcontexts (first id))]
+      (if collection?
+        (select (get elements (second id)) (subvec id 2))
+        (select sub (subvec id 1)))
+      (select ctx (first id)))
+
+    :else
+    nil))
