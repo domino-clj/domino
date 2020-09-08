@@ -1,6 +1,7 @@
 (ns domino.core
   (:require
    [domino.util :as util :refer [dissoc-in]]
+   [clojure.set :refer [union]]
    [domino.rx :as rx]))
 
 (defn compute-path [ctx id]
@@ -851,11 +852,20 @@
 (defn schema-is-async? [schema]
   (boolean (some :async? (:events schema))))
 
-(defn add-fields-to-ctx [{::keys [db] :as ctx} [field :as fields] on-complete]
+(defn add-fields-to-ctx [ctx [field :as fields] on-complete]
   (if (empty? fields)
     (on-complete ctx)
     (let [[id {::keys [path] :keys [collection? parents schema index-id] :as m}] field
-          ctx (cond-> ctx
+          get-index (when (and schema collection?)
+                      (let [compiled-model (walk-model (:model schema) {})
+                            index-path (some (fn [[k {::keys [path]}]]
+                                               (when (= index-id k)
+                                                 path))
+                                             compiled-model)]
+                        (fn [v]
+                          (get-in v index-path))))
+          {::keys [db] :as ctx}
+          (cond-> ctx
                 (not-empty m) (update ::id->opts (fnil assoc {}) id m)
                 path (->
                       (update ::id->parents (fnil assoc {}) id (or parents #{}))
@@ -875,12 +885,20 @@
                                                           {:id [::changed? id]
                                                            :args [id [::pre id]]
                                                            :args-format :vector
-                                                           :fn #(not= %1 %2)}
+                                                            :fn #(not= %1 %2)}
                                                           {:id [::changed-ever? id]
                                                            :args [id [::start id]]
                                                            :args-format :vector
                                                            :fn #(not= %1 %2)}]))
-                (and schema (schema-is-async? schema)) (assoc ::async? true))]
+                (and schema (schema-is-async? schema)) (assoc ::async? true)
+                (and schema collection?) (update ::db (fn [db]
+                                                        (println db)
+                                                        (update-in db path (fn [els]
+                                                                             (if (map? els)
+                                                                               els
+                                                                               (into {}
+                                                                                     (map (juxt get-index identity))
+                                                                                     els)))))))]
       (cond
         (and schema collection?)
         (letfn [(create-element
@@ -907,15 +925,16 @@
                                                 (conj path idx)
                                                 (::db el))
                                         cb))))
-              (add-elements-to-ctx [ctx [[k v] :as kvs] cb]
-                (if (empty? kvs)
-                  (cb ctx)
-                  (add-element-to-ctx ctx k v #(add-elements-to-ctx % (rest kvs) cb))))]
+                (add-elements-to-ctx [ctx [[k v] :as kvs] cb]
+                  (if (empty? kvs)
+                    (cb ctx)
+                    (add-element-to-ctx ctx k v #(add-elements-to-ctx % (rest kvs) cb))))]
           (-> ctx
               (update ::subcontexts (fnil assoc {}) id
                       {::collection? true
                        ::index-id index-id
                        ::create-element create-element})
+
               (add-elements-to-ctx
                (vec (get-in db path))
                #(add-fields-to-ctx % (rest fields) on-complete))))
