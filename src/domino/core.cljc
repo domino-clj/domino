@@ -892,7 +892,6 @@
                                                            :fn #(not= %1 %2)}]))
                 (and schema (schema-is-async? schema)) (assoc ::async? true)
                 (and schema collection?) (update ::db (fn [db]
-                                                        (println db)
                                                         (update-in db path (fn [els]
                                                                              (if (map? els)
                                                                                els
