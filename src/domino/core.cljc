@@ -538,7 +538,7 @@
 
 (defn clean-macc [opts {:keys [id] :as m}]
   (-> m
-      (select-keys (into [] (:inherited-keys opts)))
+      (select-keys (into [:parents] (:inherited-keys opts)))
       (cond->
           (some? id) (update :parents (fnil conj #{}) id))))
 
@@ -614,8 +614,6 @@
                  :args-format :map
                  :lazy? true
                  :args (:query constraint)
-                 ::upstream (rx/args->inputs :map (:query constraint))
-                 ::downstream (vals (:return constraint))
                  :fn (comp
                       (fn [result]
                         (reduce-kv
@@ -719,9 +717,6 @@
                          :fn identity})
       (rx/add-reaction! {:id id
                          ::is-event? true
-                         ::upstream (->> inputs
-                                         (remove (set ignore-changes)))
-                         ::downstream outputs
                          :lazy? true
                          :args (cond-> {:inputs [::inputs id]
                                         :outputs [::outputs id]
@@ -852,51 +847,46 @@
 (defn schema-is-async? [schema]
   (boolean (some :async? (:events schema))))
 
-(defn add-fields-to-ctx [ctx [field :as fields] on-complete]
+(defn add-fields-to-ctx [{::keys [subcontexts] :as ctx} [field :as fields] on-complete]
+
+  ;; Reduces over fields
+  ;;
   (if (empty? fields)
     (on-complete ctx)
     (let [[id {::keys [path] :keys [collection? parents schema index-id] :as m}] field
-          get-index (when (and schema collection?)
-                      (let [compiled-model (walk-model (:model schema) {})
-                            index-path (some (fn [[k {::keys [path]}]]
-                                               (when (= index-id k)
-                                                 path))
-                                             compiled-model)]
-                        (fn [v]
-                          (get-in v index-path))))
-          {::keys [db] :as ctx}
+          ;; TODO: rewrite to use subcontext
+          {::keys [db subcontexts] :as ctx}
           (cond-> ctx
-                (not-empty m) (update ::id->opts (fnil assoc {}) id m)
-                path (->
-                      (update ::id->parents (fnil assoc {}) id (or parents #{}))
-                      (update ::id->path (fnil assoc {}) id path)
-                      (update ::reactions (fnil into []) [{:id id
-                                                           :args ::db
-                                                           :args-format :single
-                                                           :fn #(get-in % path (:val-if-missing m))}
-                                                          {:id [::pre id]
-                                                           :args ::db-pre
-                                                           :args-format :single
-                                                           :fn #(get-in % path (:val-if-missing m))}
-                                                          {:id [::start id]
-                                                           :args ::db-start
-                                                           :args-format :single
-                                                           :fn #(get-in % path (:val-if-missing m))}
-                                                          {:id [::changed? id]
-                                                           :args [id [::pre id]]
-                                                           :args-format :vector
-                                                            :fn #(not= %1 %2)}
-                                                          {:id [::changed-ever? id]
-                                                           :args [id [::start id]]
-                                                           :args-format :vector
-                                                           :fn #(not= %1 %2)}]))
-                (and schema (schema-is-async? schema)) (assoc ::async? true)
+                path (update ::reactions (fnil into []) [{:id id
+                                                          :args ::db
+                                                          :args-format :single
+                                                          :fn #(get-in % path (:val-if-missing m))}
+                                                         {:id [::pre id]
+                                                          :args ::db-pre
+                                                          :args-format :single
+                                                          :fn #(get-in % path (:val-if-missing m))}
+                                                         {:id [::start id]
+                                                          :args ::db-start
+                                                          :args-format :single
+                                                          :fn #(get-in % path (:val-if-missing m))}
+                                                         {:id [::changed? id]
+                                                          :args [id [::pre id]]
+                                                          :args-format :vector
+                                                          :fn #(not= %1 %2)}
+                                                         {:id [::changed-ever? id]
+                                                          :args [id [::start id]]
+                                                          :args-format :vector
+                                                          :fn #(not= %1 %2)}])
                 (and schema collection?) (update ::db (fn [db]
                                                         (update-in db path (fn [els]
                                                                              (if (map? els)
                                                                                els
                                                                                (into {}
-                                                                                     (map (juxt get-index identity))
+                                                                                     (map
+                                                                                      (juxt
+                                                                                       #(get-in %
+                                                                                                (get-in subcontexts [id ::id->path index-id]))
+                                                                                       identity))
                                                                                      els)))))))]
       (cond
         (and schema collection?)
@@ -929,10 +919,8 @@
                     (cb ctx)
                     (add-element-to-ctx ctx k v #(add-elements-to-ctx % (rest kvs) cb))))]
           (-> ctx
-              (update ::subcontexts (fnil assoc {}) id
-                      {::collection? true
-                       ::index-id index-id
-                       ::create-element create-element})
+              (update ::subcontexts update id assoc
+                      ::create-element create-element)
 
               (add-elements-to-ctx
                (vec (get-in db path))
@@ -969,34 +957,6 @@
      rel-map
      rel-map)))
 
-(defn compute-relationships [{::keys [rx] :as ctx}]
-  (let [ctx'
-        (reduce
-         (fn [ctx {::keys [upstream downstream]}]
-           (-> ctx
-               (update ::downstream
-                       (fn [rel]
-                         (reduce
-                          (fn [rel' up]
-                            (update rel' up (fnil into #{}) downstream))
-                          (or rel {})
-                          upstream)))
-               (update ::upstream
-                       (fn [rel]
-                         (reduce
-                          (fn [rel' down]
-                            (update rel' down (fnil into #{}) upstream))
-                          (or rel {})
-                          downstream)))))
-         ctx
-         (filter
-          #(and (seq (::upstream %)) (seq (::downstream %)))
-          (vals rx)))]
-    (assoc
-     ctx'
-     ::upstream-deep (deep-relationships (::upstream ctx'))
-     ::downstream-deep (deep-relationships (::downstream ctx')))))
-
 (defn add-default-id [m]
   (update m :id #(or % (keyword "UUID" (str (util/random-uuid))))))
 
@@ -1005,6 +965,85 @@
       (update :events (partial mapv add-default-id))
       (update :effects (partial mapv add-default-id))
       (update :constraints (partial mapv add-default-id))))
+
+
+(declare pre-initialize)
+
+(defn pre-initialize-fields
+  [ctx fields]
+  (reduce
+   (fn [ctx [id {::keys [path] :keys [collection? parents schema index-id] :as m}]]
+     (cond-> ctx
+       (not-empty m) (update ::id->opts (fnil assoc {}) id m)
+       path (->
+             (update ::id->parents (fnil assoc {}) id (or parents #{}))
+             (update ::id->path (fnil assoc {}) id path)
+             ;; Intentionally skipping `::reactions` (see line 876)
+             )
+       (and schema (schema-is-async? schema)) (assoc ::async? true)
+       schema (update ::subcontexts (fnil assoc {}) id
+                      (if collection?
+                        (assoc
+                         (pre-initialize schema)
+                         ::collection? true
+                         ::index-id index-id)
+                        (pre-initialize schema)))))
+   ctx
+   fields))
+
+(defn compute-rels [rels]
+  (letfn [(merge-rel [rel from-ids to-ids]
+            (reduce
+             (fn [agg from]
+               (update agg from (fnil into #{}) to-ids))
+             (or rel {})
+             from-ids))]
+    (reduce
+     (fn [agg {::keys [upstream downstream]}]
+       (-> agg
+           (update ::downstream
+                   merge-rel upstream downstream)
+           (update ::upstream
+                   merge-rel downstream upstream)))
+     {::upstream {}
+      ::downstream {}}
+     rels)))
+
+(defn constraint->rels [constraint]
+  {::upstream (rx/args->inputs :map (:query constraint))
+   ::downstream (vals (:return constraint))})
+
+(defn event->rels [{:keys [id inputs outputs ctx-args handler async? ignore-changes should-run] :as event}]
+  {::upstream (->> inputs
+                   (remove (set ignore-changes)))
+   ::downstream  outputs})
+
+(defn pre-initialize-rels [ctx schema]
+  (let [{::keys [upstream downstream]} (compute-rels
+                                        (concat
+                                         (map constraint->rels (:constraints schema))
+                                         (map event->rels (:events schema))
+                                         (keep #(not-empty
+                                                 (select-keys % [::upstream ::downstream]))
+                                               (:reactions schema))))]
+    (assoc ctx
+           ::upstream upstream
+           ::downstream downstream
+           ::upstream-deep (deep-relationships upstream)
+           ::downstream-deep (deep-relationships downstream))))
+
+(defn pre-initialize [schema]
+  (let [schema (normalize-schema schema)
+        fields (walk-model (:model schema) {})]
+    (->
+     {::schema schema
+      ::async? (schema-is-async? schema)
+      ;; NOTE: document purpose for this or remove it.
+      ::event-context (:event-context schema)
+      ::fields fields}
+     (pre-initialize-fields fields)
+     (pre-initialize-rels schema)
+     )))
 
 (defn initialize
   ([schema]
@@ -1017,13 +1056,13 @@
    #_(println "Initializing...")
    (try
      (let [schema (normalize-schema schema)
-           fields (walk-model (:model schema) {})]
+           {::keys [fields] :as initial-ctx}
+           (pre-initialize schema)]
+
        (add-fields-to-ctx
-        {::db initial-db
-         ::rx (rx/create-reactive-map {::db initial-db})
-         ::schema schema
-         ::async? (schema-is-async? schema)
-         ::event-context (:event-context schema)}
+        (assoc initial-ctx
+               ::db initial-db
+               ::rx (rx/create-reactive-map {::db initial-db}))
         fields
         (fn [{::keys [async?] :as ctx}]
           (when (and async? (nil? cb))
@@ -1037,8 +1076,7 @@
               (update ::rx add-conflicts-rx!)
               (update ::rx add-event-rxns! (:events schema []))
               (update ::rx add-effect-rxns! (:effects schema []))
-              (compute-relationships)
-              (transact [] (or cb identity))))))
+              (transact []  (or cb identity))))))
      (catch #?(:clj Throwable
                :cljs js/Error) e
        (if (nil? cb)
@@ -1087,3 +1125,29 @@
 
     :else
     nil))
+
+
+(defn get-parents
+  [{::keys [id->parents subcontexts] :as ctx} id]
+  (if (vector? id)
+    (if-some [{::keys [collection? id->parents] :as sub} (get subcontexts (first id))]
+      (if collection?
+        ;; TODO: add static attributes to collection map
+        (into (conj (get-parents ctx (first id))
+                    (first id)
+                    (subvec id 0 1)
+                    (subvec id 0 2))
+              (map #(if (vector? %)
+                      (into (subvec id 0 2) %)
+                      (conj (subvec id 0 2) %)))
+              (get-parents sub (subvec id 2)))
+        (into (conj (get-parents ctx (first id))
+                    (first id)
+                    (subvec id 0 1))
+              (map #(if (vector? %)
+                      (into (subvec id 0 1) %)
+                      (conj (subvec id 0 1) %)))
+              (get-parents sub (subvec id 1)))
+        )
+      (recur ctx (first id)))
+    (id->parents id)))
