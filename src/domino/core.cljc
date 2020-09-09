@@ -1147,7 +1147,41 @@
               (map #(if (vector? %)
                       (into (subvec id 0 1) %)
                       (conj (subvec id 0 1) %)))
-              (get-parents sub (subvec id 1)))
-        )
+              (get-parents sub (subvec id 1))))
       (recur ctx (first id)))
     (id->parents id)))
+
+
+(defn get-downstream
+  [{::keys [downstream-deep subcontexts] :as ctx} id]
+  (if (vector? id)
+    (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
+      (if collection?
+        ;; TODO: add static attributes to collection map
+        (mapv #(if (vector? %)
+                 (into (subvec id 0 2) %)
+                 (conj (subvec id 0 2) %))
+              (get-downstream sub (subvec id 2)))
+        (map #(if (vector? %)
+                (into (subvec id 0 1) %)
+                (conj (subvec id 0 1) %))
+             (get-downstream sub (subvec id 1))))
+      (recur ctx (first id)))
+    (downstream-deep id)))
+
+(defn get-upstream
+  [{::keys [upstream-deep subcontexts] :as ctx} id]
+  (if (vector? id)
+    (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
+      (if collection?
+        ;; TODO: add static attributes to collection map
+        (mapv #(if (vector? %)
+                 (into (subvec id 0 2) %)
+                 (conj (subvec id 0 2) %))
+              (get-upstream sub (subvec id 2)))
+        (map #(if (vector? %)
+                (into (subvec id 0 1) %)
+                (conj (subvec id 0 1) %))
+             (get-upstream sub (subvec id 1))))
+      (recur ctx (first id)))
+    (upstream-deep id)))
