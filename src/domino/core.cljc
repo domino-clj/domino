@@ -1157,7 +1157,6 @@
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
       (if collection?
-        ;; TODO: add static attributes to collection map
         (mapv #(if (vector? %)
                  (into (subvec id 0 2) %)
                  (conj (subvec id 0 2) %))
@@ -1174,7 +1173,6 @@
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
       (if collection?
-        ;; TODO: add static attributes to collection map
         (mapv #(if (vector? %)
                  (into (subvec id 0 2) %)
                  (conj (subvec id 0 2) %))
