@@ -995,7 +995,7 @@
   (letfn [(merge-rel [rel from-ids to-ids]
             (reduce
              (fn [agg from]
-               (update agg from (fnil into #{}) to-ids))
+               (update agg from (comp set (fnil into #{})) to-ids))
              (or rel {})
              from-ids))]
     (reduce
@@ -1010,13 +1010,14 @@
      rels)))
 
 (defn constraint->rels [constraint]
-  {::upstream (rx/args->inputs :map (:query constraint))
-   ::downstream (vals (:return constraint))})
+  {::upstream (set (rx/args->inputs :map (:query constraint)))
+   ::downstream (set (vals (:return constraint)))})
 
 (defn event->rels [{:keys [id inputs outputs ctx-args handler async? ignore-changes should-run] :as event}]
   {::upstream (->> inputs
-                   (remove (set ignore-changes)))
-   ::downstream  outputs})
+                   (remove (set ignore-changes))
+                   set)
+   ::downstream  (set outputs)})
 
 (defn pre-initialize-rels [ctx schema]
   (let [{::keys [upstream downstream]} (compute-rels
@@ -1157,10 +1158,12 @@
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
       (if collection?
-        (mapv #(if (vector? %)
-                 (into (subvec id 0 2) %)
-                 (conj (subvec id 0 2) %))
-              (get-downstream sub (subvec id 2)))
+        (if (contains? id 1)
+          (mapv #(if (vector? %)
+                   (into (subvec id 0 2) %)
+                   (conj (subvec id 0 2) %))
+                (get-downstream sub (subvec id 2)))
+          (downstream-deep (first id)))
         (map #(if (vector? %)
                 (into (subvec id 0 1) %)
                 (conj (subvec id 0 1) %))
@@ -1173,10 +1176,12 @@
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
       (if collection?
-        (mapv #(if (vector? %)
-                 (into (subvec id 0 2) %)
-                 (conj (subvec id 0 2) %))
-              (get-upstream sub (subvec id 2)))
+        (if (contains? id 1)
+          (mapv #(if (vector? %)
+                   (into (subvec id 0 2) %)
+                   (conj (subvec id 0 2) %))
+                (get-upstream sub (subvec id 2)))
+          (upstream-deep (first id)))
         (map #(if (vector? %)
                 (into (subvec id 0 1) %)
                 (conj (subvec id 0 1) %))
