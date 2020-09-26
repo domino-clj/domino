@@ -34,6 +34,8 @@
        on-success
        on-fail)
 
+      ;; TODO: Add Initialize Child change to use Initialize logic instead of transact logic.
+
       ::update-child
       ;;TODO: Aggregate transaction reports somehow
       ;;TODO: unwrap long child-ctx paths in parse change
