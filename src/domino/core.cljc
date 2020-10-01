@@ -1129,6 +1129,41 @@
     :else
     nil))
 
+(defn get-path! [{::keys [id->path subcontexts]} id]
+  (let [id (if (and (coll? id)
+                    (= (count id) 1))
+             (first id)
+             id)]
+    (cond
+      (and (coll? id) (empty? id))
+      []
+
+      (vector? id)
+      (if-some [sub (get subcontexts (first id))]
+        (into (id->path (first id))
+              (if (::collection? sub)
+                (if-some [idx-id (get id 1)]
+                  (into [idx-id] (get-path! sub (subvec id 2)))
+                  [])
+                (get-path! sub (subvec id 1))))
+        (throw (ex-info "No Match!" {:id id})))
+
+      :else
+      (id->path id))))
+
+(defn get-path [ctx id]
+  (try
+    (get-path! ctx id)
+    (catch #?(:clj Throwable
+              :cljs js/Error) e
+      nil)))
+
+(defn get-in-db [ctx id]
+  (try
+    (get-in (::db ctx) (get-path! ctx id) nil)
+    (catch #?(:clj Throwable
+              :cljs js/Error) e
+      nil)))
 
 (defn get-parents
   [{::keys [id->parents subcontexts] :as ctx} id]
