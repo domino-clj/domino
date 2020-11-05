@@ -7,22 +7,62 @@
 (defn compute-path [ctx id]
   ((::id->path ctx) id))
 
+(defn is-final? [ctx id]
+  (let [opts ((::id->opts ctx) id)]
+    (or (:ignore-updates? opts)
+        (:final? opts))))
+
+(defn ignore-final? [{::keys [ignore-finals? id->opts] :as ctx} id]
+  (or (true? ignore-finals?) (contains? ignore-finals? id) (:ignore-updates? (id->opts id))))
+
+(defn trimmed-opts [ctx id]
+  (let [opts ((::id->opts ctx) id)]
+    (cond-> opts
+      (:schema opts) (assoc :schema ::elided)
+      (:initialize opts) (assoc :initialize ::elided))))
+
 (defn is-collection? [ctx]
   (::collection? ctx))
 
 (defn create-new-context-in-collection [ctx idx cb]
   ((::create-element ctx) idx cb))
 
-
 (declare transact)
 
 (defn- resolve-changes-impl
   [ctx [change :as changes] on-success on-fail]
-  (if (empty? changes)
-    (on-success ctx)
+  (cond
+    (empty? changes) (on-success ctx)
+
+    (not (#{::set-value ::remove-value ::update-child ::remove-child} (first change)))
+    (on-fail (ex-info "Invalid change!"
+                      {:id ::invalid-change
+                       :message "Invalid change!"
+                       :change change}))
+
+    (and (#{::set-value ::remove-value} (first change)) (is-final? ctx (second change)))
+    (let [id (second change)]
+      (if (ignore-final? ctx id)
+        (recur ctx (rest changes) on-success on-fail)
+        (on-fail (ex-info (str "Attempted to change final field: " id)
+                          {:id id
+                           :opts (trimmed-opts ctx id)
+                           :change change}))))
+
+
+    (and (#{::update-child ::remove-child} (first change)) (is-final? ctx (first (second change))))
+    (let [id (first (second change))]
+      (if (ignore-final? ctx id)
+        (recur ctx (rest changes) on-success on-fail)
+        (on-fail (ex-info (str "Attempted to change final field: " id)
+                          {:id id
+                           :opts (trimmed-opts ctx id)
+                           :change change}))))
+
+    :else
     (case (first change)
       ::set-value
-      (let [[_ id val] change]
+      (let [id (second change)]
         (if-some [p (compute-path ctx id)]
           (recur (update ctx ::db assoc-in p val) (rest changes) on-success on-fail)
           (on-fail (ex-info (str "No path found for id: " id)
@@ -53,7 +93,8 @@
                         tx ::transaction-report
                         :as new-child-ctx}]
                     (if (= :failed (:status tx))
-                      (on-fail (ex-info (:message (:data tx)) (update (:data tx) :subcontext-id (partial into [(if collection? [id idx?] [id])]))))
+                      (do
+                        (on-fail (ex-info (:message (:data tx)) (update (:data tx) :subcontext-id (partial into [(if collection? [id idx?] [id])])))))
                       (-> ctx
                           (assoc-in (if collection?
                                       [::subcontexts id ::elements idx?]
@@ -77,13 +118,7 @@
         (-> ctx
             (update-in [::subcontexts id ::elements] dissoc idx)
             (update ::db dissoc-in (conj (compute-path ctx id) idx))
-            (recur (rest changes) on-success on-fail)))
-
-      ;; ELSE
-      (on-fail (ex-info "Invalid change!"
-                      {:id ::invalid-change
-                       :message "Invalid change!"
-                       :change change})))))
+            (recur (rest changes) on-success on-fail))))))
 
 (defn parse-change [ctx change]
   (case (first change)
@@ -447,9 +482,9 @@
                                  (seq fxs) (assoc :triggered-effects fxs)
                                  (seq event-history) (assoc :event-history event-history)))))))
              (tx-step
-               [ctx changes]
+               [ctx-step changes]
                (handle-changes!
-                ctx changes
+                ctx-step changes
                 (fn [{state ::rx
                       db    ::db
                       ev-q  ::event-queue
@@ -483,6 +518,7 @@
                       (let [resolver-ids (vals resolvers)
                             {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
                             changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
+                        (println "\n\nresolvers" resolver-ids "\n\nCHANGES: " changes)
                         (tx-step ctx changes))
 
                       (not-empty conflicts)
@@ -699,8 +735,12 @@
                          :args-format :rx-map
                          :fn identity})
       (rx/add-reaction! {:id [::inputs-pre id]
-                         :args (mapv (partial conj [::pre]) inputs)
-                         :args-format :rx-map
+                         :args
+                         (into {}
+                               (map (juxt identity (partial conj [::pre])))
+                               inputs)
+
+                         :args-format :map
                          :fn identity})
       (rx/add-reaction! {:id [::trigger? id]
                          :args (->> inputs
@@ -714,8 +754,10 @@
                          :args-format :rx-map
                          :fn identity})
       (rx/add-reaction! {:id [::outputs-pre id]
-                         :args (mapv (partial conj [::pre]) outputs)
-                         :args-format :rx-map
+                         :args (into {}
+                                     (map (juxt identity (partial conj [::pre])))
+                                     outputs)
+                         :args-format :map
                          :fn identity})
       (rx/add-reaction! {:id id
                          ::is-event? true
@@ -971,15 +1013,22 @@
 
 (declare pre-initialize)
 
+(defn- add-db-fn [ctx path f]
+  (update ctx ::db-initializers (fnil conj []) #(update-in % path f)))
+
 (defn pre-initialize-fields
   [ctx fields]
   (reduce
-   (fn [ctx [id {::keys [path] :keys [collection? parents schema index-id] :as m}]]
+   (fn [ctx [id {::keys [path] :keys [collection? parents schema index-id initialize initial-value default-value final?] :as m}]]
      (cond-> ctx
        (not-empty m) (update ::id->opts (fnil assoc {}) id m)
        path (->
              (update ::id->parents (fnil assoc {}) id (or parents #{}))
              (update ::id->path (fnil assoc {}) id path)
+             (cond->
+                 default-value (add-db-fn path #(if (some? %) % default-value))
+                 initial-value (add-db-fn path (fn [_] initial-value))
+                 initialize    (add-db-fn path initialize))
              ;; Intentionally skipping `::reactions` (see line 876)
              )
        (and schema (schema-is-async? schema)) (assoc ::async? true)
@@ -1040,10 +1089,12 @@
         fields (walk-model (:model schema) {})]
     (->
      {::schema schema
+      ::db-initializers []
       ::async? (schema-is-async? schema)
       ;; NOTE: document purpose for this or remove it.
       ::event-context (:event-context schema)
-      ::fields fields}
+      ::fields fields
+      ::ignore-finals? (:ignore-finals? (:opts schema))}
      (pre-initialize-fields fields)
      (pre-initialize-rels schema)
      )))
@@ -1059,13 +1110,14 @@
    #_(println "Initializing...")
    (try
      (let [schema (normalize-schema schema)
-           {::keys [fields] :as initial-ctx}
-           (pre-initialize schema)]
+           {::keys [fields db-initializers] :as initial-ctx}
+           (pre-initialize schema)
+           db (reduce #(%2 %1) initial-db db-initializers)]
 
        (add-fields-to-ctx
         (assoc initial-ctx
-               ::db initial-db
-               ::rx (rx/create-reactive-map {::db initial-db}))
+               ::db db
+               ::rx (rx/create-reactive-map {::db db}))
         fields
         (fn [{::keys [async?] :as ctx}]
           (when (and async? (nil? cb))
