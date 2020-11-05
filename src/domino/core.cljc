@@ -574,9 +574,11 @@
   ;;       Possibly also provide a multimethod to allow custom merge beh'r for user specified keys.
   (merge macc m))
 
+(def always-inherit-ks [:parents :final? :ignore-updates?])
+
 (defn clean-macc [opts {:keys [id] :as m}]
   (-> m
-      (select-keys (into [:parents] (:inherited-keys opts)))
+      (select-keys (into always-inherit-ks (:inherited-keys opts)))
       (cond->
           (some? id) (update :parents (fnil conj #{}) id))))
 
@@ -1086,7 +1088,7 @@
 
 (defn pre-initialize [schema]
   (let [schema (normalize-schema schema)
-        fields (walk-model (:model schema) {})]
+        fields (walk-model (:model schema) (:opts schema {}))]
     (->
      {::schema schema
       ::db-initializers []
@@ -1112,6 +1114,8 @@
      (let [schema (normalize-schema schema)
            {::keys [fields db-initializers] :as initial-ctx}
            (pre-initialize schema)
+           ;; NOTE: db-initializers are in field order, which is top-down.
+           ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
            db (reduce #(%2 %1) initial-db db-initializers)]
 
        (add-fields-to-ctx
