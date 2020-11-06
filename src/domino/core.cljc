@@ -62,9 +62,9 @@
     :else
     (case (first change)
       ::set-value
-      (let [id (second change)]
+      (let [[_ id v] change]
         (if-some [p (compute-path ctx id)]
-          (recur (update ctx ::db assoc-in p val) (rest changes) on-success on-fail)
+          (recur (update ctx ::db assoc-in p v) (rest changes) on-success on-fail)
           (on-fail (ex-info (str "No path found for id: " id)
                             {:id id}))))
       ::remove-value
@@ -155,9 +155,9 @@
         (parse-change ctx [::update-child k? [::set m?]])))
 
     ::set-value
-    (let [[_ id val] change]
+    (let [[_ id v] change]
       (cond
-        (nil? val)
+        (nil? v)
         (parse-change ctx [::remove-value id])
 
         (vector? id)
@@ -167,13 +167,13 @@
            ctx
            (if (::collection?
                 (get (::subcontexts ctx) (first id)))
-             [::update-child (subvec id 0 2) [::set-value (subvec id 2) val]]
-             [::update-child (subvec id 0 1) [::set-value (subvec id 1) val]]))
+             [::update-child (subvec id 0 2) [::set-value (subvec id 2) v]]
+             [::update-child (subvec id 0 1) [::set-value (subvec id 1) v]]))
 
           (and (= 1 (count id)) (contains? (::id->path ctx) (first id)))
           (parse-change
            ctx
-           [::set-value (first id) val]))
+           [::set-value (first id) v]))
 
         :else
         [change]))
