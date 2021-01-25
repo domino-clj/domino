@@ -1101,6 +1101,13 @@
      (pre-initialize-rels schema)
      )))
 
+(defn apply-db-initializers [db inits]
+  (reduce
+   (fn [db init]
+     (init db))
+   db
+   inits))
+
 (defn initialize
   ([schema]
    (initialize schema {} nil))
@@ -1111,12 +1118,11 @@
   ([schema initial-db cb]
    #_(println "Initializing...")
    (try
-     (let [schema (normalize-schema schema)
-           {::keys [fields db-initializers] :as initial-ctx}
+     (let [{::keys [fields db-initializers schema] :as initial-ctx}
            (pre-initialize schema)
            ;; NOTE: db-initializers are in field order, which is top-down.
            ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
-           db (reduce #(%2 %1) initial-db db-initializers)]
+           db (apply-db-initializers initial-db db-initializers)]
 
        (add-fields-to-ctx
         (assoc initial-ctx
@@ -1163,8 +1169,9 @@
              (or cb identity))))
 
 (defn select
+  "Given an id keyword or vector, select a value from a domino context."
   [{::keys [subcontexts rx db] :as ctx} id]
-  ;; TODO: Implement selection from subcontexts.
+
   (cond
     (or (nil? id) (and (coll? id) (empty? id)))
     db
@@ -1185,7 +1192,9 @@
     :else
     nil))
 
-(defn get-path! [{::keys [id->path subcontexts]} id]
+(defn get-path!
+  "Given a domino context and an id, get the path to the value in the canonical DB"
+  [{::keys [id->path subcontexts]} id]
   (let [id (if (and (coll? id)
                     (= (count id) 1))
              (first id)
@@ -1207,21 +1216,23 @@
       :else
       (id->path id))))
 
-(defn get-path [ctx id]
+(defn get-path
+  "See get-path!. Returns nil on no match instead of throwing."
+  [ctx id]
   (try
     (get-path! ctx id)
     (catch #?(:clj Throwable
               :cljs js/Error) e
       nil)))
 
-(defn get-in-db [ctx id]
-  (try
-    (get-in (::db ctx) (get-path! ctx id) nil)
-    (catch #?(:clj Throwable
-              :cljs js/Error) e
-      nil)))
+(defn get-in-db
+  "Looks somewhat similar to select, but doesn't support arbitrary reactions"
+  [ctx id]
+  (when-some [path (get-path ctx id)]
+    (get-in (::db ctx) path nil)))
 
 (defn get-parents
+  "Gets all parent ids for an id (i.e. referenced IDs which wholly contain the id's data)"
   [{::keys [id->parents subcontexts] :as ctx} id]
   (if (vector? id)
     (if-some [{::keys [collection? id->parents] :as sub} (get subcontexts (first id))]
@@ -1247,6 +1258,7 @@
 
 
 (defn get-downstream
+  "Gets all ids that could be affected by a change on the passed id."
   [{::keys [downstream-deep subcontexts] :as ctx} id]
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
@@ -1265,6 +1277,7 @@
     (downstream-deep id)))
 
 (defn get-upstream
+  "Gets all ids which, if changed, may affect the passed id."
   [{::keys [upstream-deep subcontexts] :as ctx} id]
   (if (vector? id)
     (if-some [{::keys [collection?] :as sub} (get subcontexts (first id))]
