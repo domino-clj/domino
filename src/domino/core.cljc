@@ -1,124 +1,19 @@
 (ns domino.core
   (:require
    [domino.util :as util :refer [dissoc-in]]
+   [domino.context.helpers :as helper]
    [clojure.set :refer [union]]
-   [domino.rx :as rx]))
-
-(defn compute-path [ctx id]
-  ((::id->path ctx) id))
-
-(defn is-final? [ctx id]
-  (let [opts ((::id->opts ctx) id)]
-    (or (:ignore-updates? opts)
-        (:final? opts))))
-
-(defn ignore-final? [{::keys [ignore-finals? id->opts] :as ctx} id]
-  (or (true? ignore-finals?) (contains? ignore-finals? id) (:ignore-updates? (id->opts id))))
-
-(defn trimmed-opts [ctx id]
-  (let [opts ((::id->opts ctx) id)]
-    (cond-> opts
-      (:schema opts) (assoc :schema ::elided)
-      (:initialize opts) (assoc :initialize ::elided))))
-
-(defn is-collection? [ctx]
-  (::collection? ctx))
+   [domino.rx :as rx]
+   #_[#?(:clj  com.wsscode.async.async-clj
+       :cljs com.wsscode.async.async-cljs)
+    :as wa
+    :refer [go-promise <?]]))
 
 (defn create-new-context-in-collection [ctx idx cb]
-  ((::create-element ctx) idx cb))
+  ((:domino.core/create-element ctx) idx cb))
 
-(declare transact)
-
-(defn- resolve-changes-impl
-  [ctx [change :as changes] on-success on-fail]
-  (cond
-    (empty? changes) (on-success ctx)
-
-    (not (#{::set-value ::remove-value ::update-child ::remove-child} (first change)))
-    (on-fail (ex-info "Invalid change!"
-                      {:id ::invalid-change
-                       :message "Invalid change!"
-                       :change change}))
-
-    (and (#{::set-value ::remove-value} (first change)) (is-final? ctx (second change)))
-    (let [id (second change)]
-      (if (ignore-final? ctx id)
-        (recur ctx (rest changes) on-success on-fail)
-        (on-fail (ex-info (str "Attempted to change final field: " id)
-                          {:id id
-                           :opts (trimmed-opts ctx id)
-                           :change change}))))
-
-
-    (and (#{::update-child ::remove-child} (first change)) (is-final? ctx (first (second change))))
-    (let [id (first (second change))]
-      (if (ignore-final? ctx id)
-        (recur ctx (rest changes) on-success on-fail)
-        (on-fail (ex-info (str "Attempted to change final field: " id)
-                          {:id id
-                           :opts (trimmed-opts ctx id)
-                           :change change}))))
-
-    :else
-    (case (first change)
-      ::set-value
-      (let [[_ id v] change]
-        (if-some [p (compute-path ctx id)]
-          (recur (update ctx ::db assoc-in p v) (rest changes) on-success on-fail)
-          (on-fail (ex-info (str "No path found for id: " id)
-                            {:id id}))))
-      ::remove-value
-      (recur
-       (update ctx ::db dissoc-in (compute-path ctx (second change)))
-       (rest changes)
-       on-success
-       on-fail)
-
-      ;; TODO: Add Initialize Child change to use Initialize logic instead of transact logic.
-
-      ::update-child
-      ;;TODO: Aggregate transaction reports somehow
-      ;;TODO: unwrap long child-ctx paths in parse change
-      (let [[_ [id idx?] & child-changes] change
-            sub-context ((::subcontexts ctx) id)
-            collection? (is-collection? sub-context)
-            ;;TODO: Instead of duplicating context on creation, consider doing a merge.
-            child-ctx (if collection?
-                        (get-in sub-context [::elements idx?])
-                        sub-context)
-            subctx-id (if collection? [id idx?] [id])
-            add-event-context (fn [subctx]
-                                (update subctx ::event-context merge (::event-context ctx)))
-            tx-cb (fn [{child-v ::db
-                        tx ::transaction-report
-                        :as new-child-ctx}]
-                    (if (= :failed (:status tx))
-                      (do
-                        (on-fail (ex-info (:message (:data tx)) (update (:data tx) :subcontext-id (partial into [(if collection? [id idx?] [id])])))))
-                      (-> ctx
-                          (assoc-in (if collection?
-                                      [::subcontexts id ::elements idx?]
-                                      [::subcontexts id])
-                                    new-child-ctx)
-                          (update ::db #(let [p (cond-> (compute-path ctx id)
-                                                  collection? (conj idx?))]
-                                          (if (empty? child-v)
-                                            (dissoc-in % p)
-                                            (assoc-in % p
-                                                      child-v))))
-                          (update ::child-tx-reports
-                                  (fnil assoc {}) subctx-id tx)
-                          (resolve-changes-impl (rest changes) on-success on-fail))))]
-        (if (nil? child-ctx)
-          (create-new-context-in-collection sub-context idx? #(transact (add-event-context %) child-changes tx-cb))
-          (transact (add-event-context child-ctx) child-changes tx-cb)))
-
-      ::remove-child
-      (let [[_ [id idx]] change]
-        (-> ctx
-            (update-in [::subcontexts id ::elements] dissoc idx)
-            (update ::db dissoc-in (conj (compute-path ctx id) idx))
-            (recur (rest changes) on-success on-fail))))))
+;; ------------------------------------------------------------------------------
+;; Change Parsing
 
 (defn parse-change [ctx change]
   (case (first change)
@@ -239,7 +134,7 @@
          change)))
 
       ;; Default to set-value if the first element is a keyword with a valid path
-      (and (keyword? (first change)) (compute-path ctx (first change)))
+      (and (keyword? (first change)) (helper/compute-path ctx (first change)))
       (parse-change ctx (into (if (map? (second change))
                                 [::set]
                                 [::set-value]) change))
@@ -287,50 +182,314 @@
         [])
        (group-changes ctx)))
 
-(defn include-child-tx-reports [ctx]
-  (if-some [children (::child-tx-reports ctx)]
+(defn valid-change? [change]
+  (and
+   ;; Must begin with fundamental operations since it has already been parsed
+   (#{::set-value ::remove-value ::update-child ::remove-child}
+    (first change))))
+
+;; ------------------------------------------------------------------------------
+;; Change Handling
+
+(declare initial-transact transact)
+
+(defn prevent-change-to-final! [ctx change]
+  (let [id (if (#{::set-value ::remove-value} (first change))
+             (second change)
+             (first (second change)))]
+    (if (helper/is-final? ctx id)
+      (if (helper/ignore-final? ctx id)
+        nil
+        (throw
+         (ex-info (str "Attempted to change final field: " id)
+                  {:id id
+                   :opts (helper/trimmed-opts ctx id)
+                   :change change})))
+      change)))
+
+(defn- resolve-change-impl
+    [ctx change]
+  (case (first change)
+    ::set-value
+    (let [[_ id v] change]
+      (if-some [p (helper/compute-path ctx id)]
+        (-> ctx
+            (update ::db assoc-in p v)
+            (update-in [::transaction-report :changes]
+                       (fnil conj [])
+                       {:change change
+                        :id     id
+                        :status :complete}))
+        (throw
+         (ex-info (str "No path found for id: " id)
+                  {:id id}))))
+
+    ::remove-value
+    (let [[_ id] change]
+      (if-some [p (helper/compute-path ctx id)]
+        (-> ctx
+            (update ::db dissoc-in p)
+            (update-in [::transaction-report :changes]
+                       (fnil conj [])
+                       {:change change
+                        :id     id
+                        :status :complete}))
+        (throw
+         (ex-info (str "No path found for id: " id)
+                  {:id id}))))
+
+    ::update-child
+
+    (let [[_ [id idx?] & child-changes] change
+          sub-context ((::subcontexts ctx) id)
+          collection? (helper/is-collection? sub-context)
+          child-ctx? (if collection?
+                       (get-in sub-context [::elements idx?])
+                       sub-context)
+          subctx-id (if collection? [id idx?] [id])
+          child-element-path (if collection?
+                               [::subcontexts id ::elements idx?]
+                               [::subcontexts id])
+          child-db-path (cond-> (helper/compute-path ctx id)
+                          collection? (conj idx?))
+          child-ctx-pre  (-> child-ctx?
+                             (or ((::create-element sub-context) idx?))
+                             (update ::event-context merge (::event-context ctx))
+                             (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id)))
+          child-ctx (cond-> child-ctx-pre
+                        ;; NOTE: possible async here.
+                      (nil?  child-ctx?) (->
+                                          (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
+                                          initial-transact)
+                        (some? child-ctx?) (transact child-changes))
+          child-db (::db child-ctx)
+          child-tx-report (::transaction-report child-ctx)]
+      ;; NOTE: in error handling, consider child contexts.
+      (-> ctx
+          (assoc-in child-element-path child-ctx)
+          (update ::db (fn [db]
+                         (if (empty? child-db)
+                           (dissoc-in db child-db-path)
+                           (assoc-in  db child-db-path child-db))))
+          (update-in [::transaction-report :changes]
+                     (fnil conj []) {:change change
+                                     :id     subctx-id
+                                     :status :complete
+                                     :report child-tx-report})))
+
+    ::remove-child
+    (let [[_ [id idx]] change]
+      (-> ctx
+          (update-in [::subcontexts id ::elements] dissoc idx)
+          (update ::db dissoc-in (conj (helper/compute-path ctx id) idx))
+          (update-in [::transaction-report :changes]
+                     (fnil conj []) {:change change
+                                     :id     [id idx]
+                                     :status :complete})))))
+
+;; NOTE: consider collapsing `resolve-changes-impl` and `resolve-changes` into a single async-friendly reducer to simplify errors & call stack.
+
+
+(defn resolve-change
+  [ctx-pre change]
+  (if (valid-change? change)
+    (resolve-change-impl ctx-pre change)
+   (throw
+    (ex-info "Invalid change!"
+             {:id ::invalid-change
+              :message "Invalid change!"
+              :change change}))))
+
+
+;; ------------------------------------------------------------------------------
+;; Transaction Handling
+
+(def transaction-state-keys
+  [::transaction-report ::db-hashes ::triggered-effects])
+
+
+(defn clear-transaction-data [ctx]
+  (apply dissoc ctx transaction-state-keys))
+
+(defn append-events-to-queue
+  "Add any pending events (which aren't ignored) to the event queue.
+   Events with `:evaluation` `:once` will bubble to the tail of the queue."
+  [{hist ::event-history
+    event-queue ::event-queue
+    :as ctx}]
+    (let [triggered
+          (->>
+           (rx/get-reaction (::rx ctx) ::events)
+           (map (or (::events ctx) {}))
+           (remove (fn [{ev-id :id
+                         :keys [evaluation
+                                exclusions
+                                ignore-events]
+                         :or {exclusions #{}
+                              ignore-events #{}
+                              evaluation :converge-weak}
+                         :as event}]
+                     (or
+                      ;; Prevent self-triggering
+                      (and (= :converge-weak evaluation) (= (last hist) ev-id))
+                      ;; Prevent ignore-events triggering
+                      (contains? ignore-events (last hist))
+                      ;; Prevent exclusions in queue
+                      (some (partial contains? exclusions) event-queue)
+                      ;; Prevent exclusions or self in history
+                      (some #(or (exclusions %) (= ev-id %)) hist)
+                      ;; Prevent :first when already in queue
+                      (and (= :first evaluation) (some #(= ev-id %) event-queue))))))
+          append-events (map :id triggered)
+          prune-events  (set
+                         (keep
+                          (fn [e]
+                            (when (= :once (:evaluation e))
+                              (:id e)))
+                          triggered))]
+      (cond-> ctx
+        (not-empty prune-events)
+        (update ::event-queue (partial into util/empty-queue (remove prune-events)))
+        (not-empty append-events)
+        (update ::event-queue (fnil into util/empty-queue) append-events))))
+
+(defn append-db-hash!
+  "Add a new db hash to the set of encountered hashes, error if duplicate is found."
+  [ctx]
+  (let [hashes (::db-hashes ctx #{})
+        h (hash (rx/get-reaction (::rx ctx) ::db))]
+    (if (hashes h)
+      (throw (ex-info "Repeated DB state within transaction!"
+                      {:id ::cyclic-transaction
+                       :hashes hashes
+                       ::db (rx/get-reaction (::rx ctx) ::db)}))
+      (update ctx ::db-hashes (fnil conj #{}) h))))
+
+(defn update-rx [ctx]
+  (update ctx ::rx rx/update-root
+          (fn [{db-pre ::db :as root}]
+            (assoc root
+                   ::db (::db ctx)
+                   ::db-pre db-pre))))
+
+(defn db-changed? [ctx]
+  (not= (::db ctx) (rx/get-reaction (::rx ctx) ::db)))
+
+
+(defn get-resolution-changeset! [ctx]
+  (let [{:keys [unresolvable
+                resolvers]
+         :as conflicts} (rx/get-reaction (::rx ctx) ::conflicts)]
+    (cond
+      (not-empty unresolvable)
+      (throw (ex-info "Encountered unresolvable constraint violation"
+                      {:status :failed
+                       :reason ::unresolvable-constraint
+                       :data
+                       {:unresolvable unresolvable
+                        :conflicts conflicts}}))
+
+      (not-empty conflicts)
+      (reduce
+       (fn [acc [_ resolver]]
+         (into acc (rx/get-reaction (::rx ctx) resolver)))
+       []
+       resolvers)
+      :else
+      [])))
+
+(defn trigger-output-effects! [ctx]
+  (let [rx (::rx ctx)]
+    (doall
+      (keep
+       (fn [fx-id]
+         (let [run-fx! (rx/get-reaction rx fx-id)]
+           (when (fn? run-fx!)
+             (run-fx!)
+             fx-id)))
+       (rx/get-reaction rx ::effects)))))
+
+(defn resume-transaction
+  [{db-pre ::db
+    event-context ::event-context
+    changes ::pending-changes
+    :as ctx-pre}]
+  ;; DO THE TRANSACTION
+
+  (if (not-empty changes)
+    ;; 1. resolve changes
+
+    (-> ctx-pre
+        (assoc ::pending-changes (rest changes))
+        (resolve-change (first changes))
+        ;; NOTE: recur may be replaced by `resume-transaction` continuation
+        (recur))
+    ;; 2. Handle the results of change resolution
+    (let [ctx
+          (if (db-changed? ctx-pre)
+            (-> ctx-pre
+                ;; 2a) Update reactive-map's `::db` and `::db-pre` to recompute relevant reactions.
+                (update-rx)
+                ;; 2b) reads the `::events` special reaction and adds triggered events to the queue
+                (append-events-to-queue)
+                ;; 2c) Adds the latest db-hash, erroring if duplicate
+                (append-db-hash!))
+            ctx-pre)
+          ;; 3. Check Conflicts and Events
+          resolution-changeset (get-resolution-changeset! ctx)
+          event-queue          (::event-queue ctx)]
+      (cond
+        ;; Resolve conflicts if they exist.
+        (not-empty resolution-changeset)
+        (-> ctx
+            (assoc ::pending-changes
+                   (parse-changes ctx resolution-changeset))
+            (recur))
+        ;; Resolve an event if it is present
+        (not-empty event-queue)
+        (let [event-id (peek event-queue)
+              c (rx/get-reaction (::rx ctx) event-id)]
+          ;; NOTE: this is where async may be needed. Currently, event returns a fn.
+          ;; TODO: async!
+          (cond-> ctx
+            (some? c)  (->
+                        (update ::event-history   (fnil conj []) (peek event-queue))
+                        (assoc  ::pending-changes (parse-changes ctx [c])))
+            true       (->
+                        (update ::event-queue pop)
+                        (recur))))
+        ;; Otherwise, we're done!
+        :else
+        (let [triggered-effects (trigger-output-effects! ctx) ;; NOTE: consider failure case for async here
+              event-history     (::event-history ctx)]
+          (-> ctx
+              (dissoc ::db-hashes
+                      ::event-queue
+                      ::event-history
+                      ::pending-changes)
+              (assoc
+               ::triggered-effects triggered-effects)
+              (update ::transaction-report
+                      #(cond-> %
+                         (seq triggered-effects) (assoc :triggered-effects
+                                                        triggered-effects)
+                         (seq event-history)     (assoc :event-history
+                                                        event-history)
+                         :true (assoc :status :complete)))))))))
+
+(defn initial-transact [ctx]
     (-> ctx
-        (update ::transaction-report assoc ::children children)
-        (dissoc ::child-tx-reports))
-    ctx))
-
-(defn resolve-changes [ctx changes post-cb]
-  ;;TODO: manage change-parsing and transaction annotation from `transact` fn
-  ;; consider compiling the transaction-report from ephemeral keys assoc'd here (i.e. middleware style)
-  (try
-    (let [parsed-changes (parse-changes ctx changes)]
-      (resolve-changes-impl ctx parsed-changes
-                            (fn on-success
-                              [ctx]
-                              (-> ctx
-                                  (update ::transaction-report (fnil assoc {}) :status :complete)
-                                  (include-child-tx-reports)
-                                  (update-in
-                                   [::transaction-report :changes]
-                                   (fnil into [])
-                                   parsed-changes)
-                                  post-cb))
-                            (fn on-fail
-                              [ex]
-                              (let [data (ex-data ex)]
-                                (case (:id data)
-                                  ::invalid-change
-                                  (post-cb
-                                   (assoc ctx ::transaction-report {:status :failed
-                                                                    :reason ::invalid-change
-                                                                    :message (ex-message ex)
-                                                                    :data   data}))
-                                  (throw ex))))))
-    (catch #?(:clj Exception :cljs js/Error) ex
-      (let [data (ex-data ex)]
-        (post-cb
-         (assoc ctx ::transaction-report {:status :failed
-                                          :reason ::change-parsing-failed
-                                          :data   data
-                                          :message (ex-message ex)}))))))
-
-(defn get-db [ctx]
-  (-> ctx ::rx ::db :value))
+        clear-transaction-data
+        append-events-to-queue
+        (update ::rx rx/update-root
+                assoc
+                ;; ::db-pre preserves db state from beginning of each transaction step.
+                ::db-pre   nil
+                ;; ::db-start preserves db state from beginning of transaction
+                ::db-start nil
+                ;; ::ctx allows for reactions to pull data from the context itself
+                ::ctx (::event-context ctx))
+        (resume-transaction)))
 
 (defn transact
   ([ctx user-changes]
@@ -339,235 +498,408 @@
                      {:schema (::schema ctx)
                       :async? (::async? ctx)}))
      (transact ctx user-changes identity)))
-  ([{db-pre? ::db event-context ::event-context initialized? ::initialized? :as ctx-pre} user-changes cb]
-   ;; TODO: replace initialized? flag with `::core/set-db` change type
-   (let [db-pre (when initialized? db-pre?)]
-     (letfn [(rollback!
-               [ctx]
-               (-> ctx-pre
-                   (dissoc ::db-hashes
-                           ::event-queue)
-                   (assoc ::transaction-report (::transaction-report ctx))
-                   cb))
-             (append-db-hash!
-               [ctx]
-               (let [hashes (::db-hashes ctx #{})
-                     h (hash (get-db ctx))]
-                 (if (hashes h)
-                   (throw (ex-info "Repeated DB state within transaction!"
-                                   {:id ::cyclic-transaction
-                                    :hashes hashes
-                                    ::db (get-db ctx)}))
-                   (update ctx ::db-hashes (fnil conj #{}) h))))
-             (append-events-to-queue
-               [{state ::rx  events ::events hist ::event-history :as ctx}]
-               (let [triggered (rx/get-reaction state ::events)
-                     append-event-fn (fn [ev-q ev-id]
-                                       ;; TODO: handle event bubbling and pruning here
-                                       (let [{:keys [evaluation
-                                                     exclusions
-                                                     ignore-events]
-                                              :or {exclusions #{}
-                                                   ignore-events #{}
-                                                   evaluation :converge-weak}
-                                              :as event}
-                                             (get events ev-id)]
-                                         #_(println
-                                          "Appending..." ev-id
-                                          "to " ev-q "? (" triggered ")"
-                                          (or
-                                           ;; Prevent self-triggering
-                                           (and
-                                            (and (= :converge-weak evaluation) (= (last hist) ev-id))
-                                            1)
-                                           ;; Prevent ignore-events triggering
-                                           (and
-                                            (contains? ignore-events (last hist))
-                                            2)
-                                           ;; Prevent exclusions in queue
-                                           (and
-                                            (some (partial contains? exclusions) ev-q)
-                                            3)
-                                           ;; Prevent exclusions or self in history
-                                           (and
-                                            (some #(or (exclusions %) (= ev-id %)) hist)
-                                            4)
-                                           ;; Prevent :first when already in queue
-                                           (and
-                                            (and (= :first evaluation) (some #(= ev-id %) ev-q))
-                                            5)
-                                           "FALSE"))
-                                         (cond
-                                           ;; Prune event cases.
-                                           (or
-                                            ;; Prevent self-triggering
-                                            (and (= :converge-weak evaluation) (= (last hist) ev-id))
-                                            ;; Prevent ignore-events triggering
-                                            (contains? ignore-events (last hist))
-                                            ;; Prevent exclusions in queue
-                                            (some (partial contains? exclusions) ev-q)
-                                            ;; Prevent exclusions or self in history
-                                            (some #(or (exclusions %) (= ev-id %)) hist)
-                                            ;; Prevent :first when already in queue
-                                            (and (= :first evaluation) (some #(= ev-id %) ev-q)))
-                                           ev-q
+  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes cb]
+   (-> ctx-pre
+       clear-transaction-data
 
-                                           ;; Bubble :once instead of standard triggering behaviour.
-                                           (= :once evaluation)
-                                           (conj
-                                            (into
-                                             util/empty-queue
-                                             (remove #(= % ev-id))
-                                             ev-q)
-                                            ev-id)
+       (update ::rx rx/update-root
+               assoc
+               ;; ::db-pre preserves db state from beginning of each transaction step.
+               ::db-pre   db-pre
+               ;; ::db-start preserves db state from beginning of transaction
+               ::db-start db-pre
+               ;; ::ctx allows for reactions to pull data from the context itself
+               ::ctx event-context)
+       (assoc ::pending-changes (parse-changes ctx-pre user-changes))
+       (resume-transaction))))
 
-                                           ;; Default event triggered behaviour
-                                           :else
-                                           (conj ev-q ev-id))))]
-                 (update ctx ::event-queue
-                         (fnil (partial reduce append-event-fn) util/empty-queue)
-                         triggered)))
-             (handle-changes!
-               [ctx changes post-cb]
-               (resolve-changes ctx changes
-                                (fn [{::keys [db transaction-report] :as ctx'}]
-                                  (if (= :failed (:status transaction-report))
-                                    (rollback! ctx')
-                                    (try
-                                      (-> ctx'
-                                          (update ::rx rx/update-root
-                                                  (fn [{db-pre ::db :as root}]
-                                                    (assoc root
-                                                           ::db db
-                                                           ::db-pre db-pre)))
-                                          (append-events-to-queue)
-                                          append-db-hash!
-                                          post-cb)
-                                      (catch #?(:clj Exception
-                                                :cljs js/Error) ex
-                                        (case (:id (ex-data ex))
-                                          ::cyclic-transaction
-                                          (rollback! (assoc ctx' ::transaction-report
-                                                             {:status :failed
-                                                              :reason ::cyclic-transaction
-                                                              :data (ex-data ex)}))
-                                          ;;else
-                                          (rollback! (assoc ctx' ::transaction-report
-                                                             {:status :failed
-                                                              :reason ::unknown-error
-                                                              :message (ex-message ex)
-                                                              :data (ex-data ex)
-                                                              :error
-                                                              ex})))))))))
-             (post-tx
-               [{::keys [rx transaction-report event-history] :as ctx}]
-               (let [fxs (if (= :complete (:status transaction-report))
-                           (rx/get-reaction rx ::effects)
-                           [])]
-                 (doseq [fx fxs
-                         :let
-                         [run-fx! (rx/get-reaction rx fx)]]
-                   ;; Evaluate each effect fn
-                   (when (fn? run-fx!) (run-fx!)))
-                 (cb
-                  (-> ctx
-                      (dissoc
-                       ::db-hashes
-                       ::event-queue
-                       ::event-history)
-                      (assoc
-                       ::triggered-effects fxs)
-                      (update ::transaction-report
-                              #(cond-> %
-                                 (seq fxs) (assoc :triggered-effects fxs)
-                                 (seq event-history) (assoc :event-history event-history)))))))
-             (tx-step
-               [ctx-step changes]
+(comment
+  ;; NOTE: Old Implementations!
+
+  (declare transact)
+
+  (defn- resolve-changes-impl
+    [ctx [change :as changes] on-success on-fail]
+    ;; NOTE: to be replaced by new impl.
+    (cond
+      (empty? changes) (on-success ctx)
+
+      (not (#{::set-value ::remove-value ::update-child ::remove-child} (first change)))
+      (on-fail (ex-info "Invalid change!"
+                        {:id ::invalid-change
+                         :message "Invalid change!"
+                         :change change}))
+
+      (and (#{::set-value ::remove-value} (first change)) (helper/is-final? ctx (second change)))
+      (let [id (second change)]
+        (if (helper/ignore-final? ctx id)
+          (recur ctx (rest changes) on-success on-fail)
+          (on-fail (ex-info (str "Attempted to change final field: " id)
+                            {:id id
+                             :opts (helper/trimmed-opts ctx id)
+                             :change change}))))
+
+
+      (and (#{::update-child ::remove-child} (first change)) (helper/is-final? ctx (first (second change))))
+      (let [id (first (second change))]
+        (if (helper/ignore-final? ctx id)
+          (recur ctx (rest changes) on-success on-fail)
+          (on-fail (ex-info (str "Attempted to change final field: " id)
+                            {:id id
+                             :opts (helper/trimmed-opts ctx id)
+                             :change change}))))
+
+      :else
+      (case (first change)
+        ::set-value
+        (let [[_ id v] change]
+          (if-some [p (helper/compute-path ctx id)]
+            (recur (update ctx ::db assoc-in p v) (rest changes) on-success on-fail)
+            (on-fail (ex-info (str "No path found for id: " id)
+                              {:id id}))))
+        ::remove-value
+        (recur
+         (update ctx ::db dissoc-in (helper/compute-path ctx (second change)))
+         (rest changes)
+         on-success
+         on-fail)
+
+        ;; TODO: Add Initialize Child change to use Initialize logic instead of transact logic.
+
+        ::update-child
+        ;;TODO: Aggregate transaction reports somehow
+        ;;TODO: unwrap long child-ctx paths in parse change
+        (let [[_ [id idx?] & child-changes] change
+              sub-context ((::subcontexts ctx) id)
+              collection? (helper/is-collection? sub-context)
+              ;;TODO: Instead of duplicating context on creation, consider doing a merge.
+              child-ctx (if collection?
+                          (get-in sub-context [::elements idx?])
+                          sub-context)
+              subctx-id (if collection? [id idx?] [id])
+              add-event-context (fn [subctx]
+                                  (update subctx ::event-context merge (::event-context ctx)))
+              tx-cb (fn [{child-v ::db
+                          tx ::transaction-report
+                          :as new-child-ctx}]
+                      (if (= :failed (:status tx))
+                        (do
+                          (on-fail (ex-info (:message (:data tx)) (update (:data tx) :subcontext-id (partial into [(if collection? [id idx?] [id])])))))
+                        (-> ctx
+                            (assoc-in (if collection?
+                                        [::subcontexts id ::elements idx?]
+                                        [::subcontexts id])
+                                      new-child-ctx)
+                            (update ::db #(let [p (cond-> (helper/compute-path ctx id)
+                                                    collection? (conj idx?))]
+                                            (if (empty? child-v)
+                                              (dissoc-in % p)
+                                              (assoc-in % p
+                                                        child-v))))
+                            (update ::child-tx-reports
+                                    (fnil assoc {}) subctx-id tx)
+                            (resolve-changes-impl (rest changes) on-success on-fail))))]
+          (if (nil? child-ctx)
+            (create-new-context-in-collection sub-context idx? #(transact (add-event-context %) child-changes tx-cb))
+            (transact (add-event-context child-ctx) child-changes tx-cb)))
+
+        ::remove-child
+        (let [[_ [id idx]] change]
+          (-> ctx
+              (update-in [::subcontexts id ::elements] dissoc idx)
+              (update ::db dissoc-in (conj (helper/compute-path ctx id) idx))
+              (recur (rest changes) on-success on-fail))))))
+
+  (defn include-child-tx-reports [ctx]
+    (if-some [children (::child-tx-reports ctx)]
+      (-> ctx
+          (update ::transaction-report assoc ::children children)
+          (dissoc ::child-tx-reports))
+      ctx))
+
+  (defn resolve-changes [ctx changes post-cb]
+    ;; NOTE: to be replaced by new impl
+
+    ;;TODO: manage change-parsing and transaction annotation from `transact` fn
+    ;; consider compiling the transaction-report from ephemeral keys assoc'd here (i.e. middleware style)
+    (try
+      (let [parsed-changes (parse-changes ctx changes)]
+        (resolve-changes-impl ctx parsed-changes
+                              (fn on-success
+                                [ctx]
+                                (-> ctx
+                                    (update ::transaction-report (fnil assoc {}) :status :complete)
+                                    (include-child-tx-reports)
+                                    (update-in
+                                     [::transaction-report :changes]
+                                     (fnil into [])
+                                     parsed-changes)
+                                    post-cb))
+                              (fn on-fail
+                                [ex]
+                                (let [data (ex-data ex)]
+                                  (case (:id data)
+                                    ::invalid-change
+                                    (post-cb
+                                     (assoc ctx ::transaction-report {:status :failed
+                                                                      :reason ::invalid-change
+                                                                      :message (ex-message ex)
+                                                                      :data   data}))
+                                    (throw ex))))))
+      (catch #?(:clj Exception :cljs js/Error) ex
+        (let [data (ex-data ex)]
+          (post-cb
+           (assoc ctx ::transaction-report {:status :failed
+                                            :reason ::change-parsing-failed
+                                            :data   data
+                                            :message (ex-message ex)}))))))
+
+  (defn transact
+    ([ctx user-changes]
+     (if (::async? ctx)
+       (throw (ex-info "Schema is async, but no callback was provided!"
+                       {:schema (::schema ctx)
+                        :async? (::async? ctx)}))
+       (transact ctx user-changes identity)))
+    ([{db-pre? ::db event-context ::event-context initialized? ::initialized? :as ctx-pre} user-changes cb]
+     ;; TODO: replace initialized? flag with `::core/set-db` change type
+     (let [db-pre (when initialized? db-pre?)]
+       (letfn [(rollback!
+                 [ctx]
+                 (-> ctx-pre
+                     (dissoc ::db-hashes
+                             ::event-queue)
+                     (assoc ::transaction-report (::transaction-report ctx))
+                     cb))
+               (append-db-hash!
+                 [ctx]
+                 (let [hashes (::db-hashes ctx #{})
+                       h (hash (rx/get-reaction (::rx ctx) ::db))]
+                   (if (hashes h)
+                     (throw (ex-info "Repeated DB state within transaction!"
+                                     {:id ::cyclic-transaction
+                                      :hashes hashes
+                                      ::db (rx/get-reaction (::rx ctx) ::db)}))
+                     (update ctx ::db-hashes (fnil conj #{}) h))))
+               (append-events-to-queue
+                 [{state ::rx  events ::events hist ::event-history :as ctx}]
+                 (let [triggered (rx/get-reaction state ::events)
+                       append-event-fn (fn [ev-q ev-id]
+                                         ;; TODO: handle event bubbling and pruning here
+                                         (let [{:keys [evaluation
+                                                       exclusions
+                                                       ignore-events]
+                                                :or {exclusions #{}
+                                                     ignore-events #{}
+                                                     evaluation :converge-weak}
+                                                :as event}
+                                               (get events ev-id)]
+                                           #_(println
+                                              "Appending..." ev-id
+                                              "to " ev-q "? (" triggered ")"
+                                              (or
+                                               ;; Prevent self-triggering
+                                               (and
+                                                (and (= :converge-weak evaluation) (= (last hist) ev-id))
+                                                1)
+                                               ;; Prevent ignore-events triggering
+                                               (and
+                                                (contains? ignore-events (last hist))
+                                                2)
+                                               ;; Prevent exclusions in queue
+                                               (and
+                                                (some (partial contains? exclusions) ev-q)
+                                                3)
+                                               ;; Prevent exclusions or self in history
+                                               (and
+                                                (some #(or (exclusions %) (= ev-id %)) hist)
+                                                4)
+                                               ;; Prevent :first when already in queue
+                                               (and
+                                                (and (= :first evaluation) (some #(= ev-id %) ev-q))
+                                                5)
+                                               "FALSE"))
+                                           (cond
+                                             ;; Prune event cases.
+                                             (or
+                                              ;; Prevent self-triggering
+                                              (and (= :converge-weak evaluation) (= (last hist) ev-id))
+                                              ;; Prevent ignore-events triggering
+                                              (contains? ignore-events (last hist))
+                                              ;; Prevent exclusions in queue
+                                              (some (partial contains? exclusions) ev-q)
+                                              ;; Prevent exclusions or self in history
+                                              (some #(or (exclusions %) (= ev-id %)) hist)
+                                              ;; Prevent :first when already in queue
+                                              (and (= :first evaluation) (some #(= ev-id %) ev-q)))
+                                             ev-q
+
+                                             ;; Bubble :once instead of standard triggering behaviour.
+                                             (= :once evaluation)
+                                             (conj
+                                              (into
+                                               util/empty-queue
+                                               (remove #(= % ev-id))
+                                               ev-q)
+                                              ev-id)
+
+                                             ;; Default event triggered behaviour
+                                             :else
+                                             (conj ev-q ev-id))))]
+                   (update ctx ::event-queue
+                           (fnil (partial reduce append-event-fn) util/empty-queue)
+                           triggered)))
                (handle-changes!
-                ctx-step changes
-                (fn [{state ::rx
-                      db    ::db
-                      ev-q  ::event-queue
-                      tx-report ::transaction-report
-                      :as ctx}]
-                  (let [;; 2. Identify any conflicts that have arisen.
-                        {::keys [unresolvable resolvers]
-                         :as conflicts}
-                        (rx/get-reaction state ::conflicts)]
-                    ;; TODO: decide if this is guaranteed to halt, and either amend it so that it is, or add a timeout.
-                    ;;       if a timeout is added, add some telemetry to see where cycles arise.
-                    (cond
-                      (= :failed (:status tx-report))
-                      (rollback! ctx)
+                 [ctx changes post-cb]
+                 (resolve-changes ctx changes
+                                  (fn [{::keys [db transaction-report] :as ctx'}]
+                                    (if (= :failed (:status transaction-report))
+                                      (rollback! ctx')
+                                      (try
+                                        (-> ctx'
+                                            (update ::rx rx/update-root
+                                                    (fn [{db-pre ::db :as root}]
+                                                      (assoc root
+                                                             ::db db
+                                                             ::db-pre db-pre)))
+                                            (append-events-to-queue)
+                                            append-db-hash!
+                                            post-cb)
+                                        (catch #?(:clj Exception
+                                                  :cljs js/Error) ex
+                                          (case (:id (ex-data ex))
+                                            ::cyclic-transaction
+                                            (rollback! (assoc ctx' ::transaction-report
+                                                              {:status :failed
+                                                               :reason ::cyclic-transaction
+                                                               :data (ex-data ex)}))
+                                            ;;else
+                                            (rollback! (assoc ctx' ::transaction-report
+                                                              {:status :failed
+                                                               :reason ::unknown-error
+                                                               :message (ex-message ex)
+                                                               :data (ex-data ex)
+                                                               :error
+                                                               ex})))))))))
+               (post-tx
+                 [{::keys [rx transaction-report event-history] :as ctx}]
+                 (let [fxs (if (= :complete (:status transaction-report))
+                             (rx/get-reaction rx ::effects)
+                             [])]
+                   (doseq [fx fxs
+                           :let
+                           [run-fx! (rx/get-reaction rx fx)]]
+                     ;; Evaluate each effect fn
+                     (when (fn? run-fx!) (run-fx!)))
+                   (cb
+                    (-> ctx
+                        (dissoc
+                         ::db-hashes
+                         ::event-queue
+                         ::event-history)
+                        (assoc
+                         ::triggered-effects fxs)
+                        (update ::transaction-report
+                                #(cond-> %
+                                   (seq fxs) (assoc :triggered-effects fxs)
+                                   (seq event-history) (assoc :event-history event-history)))))))
+               (tx-step
+                 [ctx-step changes]
+                 (handle-changes!
+                  ctx-step changes
+                  (fn [{state ::rx
+                        db    ::db
+                        ev-q  ::event-queue
+                        tx-report ::transaction-report
+                        :as ctx}]
+                    (let [;; 2. Identify any conflicts that have arisen.
+                          {::keys [unresolvable resolvers]
+                           :as conflicts}
+                          (rx/get-reaction state ::conflicts)]
+                      ;; TODO: decide if this is guaranteed to halt, and either amend it so that it is, or add a timeout.
+                      ;;       if a timeout is added, add some telemetry to see where cycles arise.
+                      (cond
+                        (= :failed (:status tx-report))
+                        (rollback! ctx)
 
-                      (and (empty? conflicts) (empty? ev-q))
-                      (do
-                        (post-tx ctx))
+                        (and (empty? conflicts) (empty? ev-q))
+                        (do
+                          (post-tx ctx))
 
-                      (not-empty unresolvable)
-                      (rollback! (update ctx ::transaction-report
-                                         merge
-                                         {:status :failed
-                                          :reason ::unresolvable-constraint
-                                          :data
-                                          {:unresolvable unresolvable
-                                           :conflicts conflicts}}))
+                        (not-empty unresolvable)
+                        (rollback! (update ctx ::transaction-report
+                                           merge
+                                           {:status :failed
+                                            :reason ::unresolvable-constraint
+                                            :data
+                                            {:unresolvable unresolvable
+                                             :conflicts conflicts}}))
 
-                      ;; TODO: Ensure that resolvers can operate in parallel
-                      (not-empty resolvers)
-                      (let [resolver-ids (vals resolvers)
-                            {state ::rx :as ctx} (update ctx ::rx #(reduce rx/compute-reaction % resolver-ids))
-                            changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
-                        (println "\n\nresolvers" resolver-ids "\n\nCHANGES: " changes)
-                        (tx-step ctx changes))
+                        ;; TODO: Ensure that resolvers can operate in parallel
+                        (not-empty resolvers)
+                        (let [resolver-ids (vals resolvers)
+                              {state ::rx :as ctx} (update ctx
+                                                           ::rx
+                                                           #(reduce rx/compute-reaction % resolver-ids))
+                              changes (reduce (fn [acc resolver] (into acc (rx/get-reaction state resolver))) [] resolver-ids)]
+                          (println "\n\nresolvers" resolver-ids "\n\nCHANGES: " changes)
+                          (tx-step ctx changes))
 
-                      (not-empty conflicts)
-                      (rollback! (update ctx ::transaction-report
-                                         merge
-                                         {:status :failed
-                                          :reason ::invalid-conflicts
-                                          :data {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
-                                                 :conflicts conflicts
-                                                 :reaction-definition (get state ::conflicts)}}))
+                        (not-empty conflicts)
+                        (rollback! (update ctx ::transaction-report
+                                           merge
+                                           {:status :failed
+                                            :reason ::invalid-conflicts
+                                            :data {:unexpected-keys (remove #{::resolvers ::passed ::unresolvable} (keys conflicts))
+                                                   :conflicts conflicts
+                                                   :reaction-definition (get state ::conflicts)}}))
 
-                      :else
-                      (letfn [(trigger-event [q c]
-                                (tx-step (-> ctx
-                                             (assoc ::event-queue (pop q))
-                                             (update ::event-history (fnil conj []) (peek q)))
-                                         [c]))
-                              ;; Pass state rx-map to allow use of `compute-reaction` for caching
-                              (run-next-event [state q]
-                                (if (empty? q)
-                                  (post-tx ctx)
-                                  (let [ev-id (peek q)
-                                        state (rx/compute-reaction state ev-id)
-                                        c (rx/get-reaction state ev-id)]
-                                    #_(println "ev-id: " ev-id "Result: " c)
-                                    (cond
-                                      (nil? c)
-                                      (recur state (pop q))
-                                      (fn? c)
-                                      (c (fn [r]
-                                           (if (nil? r)
-                                             (run-next-event state (pop q))
-                                             (trigger-event q r))))
-                                      :else
-                                      (trigger-event q c)))))]
-                        #_(println "Events..." ev-q )
-                        (run-next-event state ev-q)))))))]
-       #_(println "Transacting... " (::db ctx-pre) "Changes..." user-changes)
-       (tx-step (-> ctx-pre
-                    (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
-                    (cond->
-                        (not initialized?) append-events-to-queue)
-                    (assoc ::initialized? true)
-                    (update ::rx rx/update-root
-                            assoc
-                            ::db-pre   db-pre
-                            ::db-start db-pre
-                            ::ctx event-context)) ;; Add db-pre for event triggering
-                user-changes)))))                                        ;; Start tx with user driven changes.
+                        :else
+                        (letfn [(trigger-event [q c]
+                                  (tx-step (-> ctx
+                                               (assoc ::event-queue (pop q))
+                                               (update ::event-history (fnil conj []) (peek q)))
+                                           [c]))
+                                ;; Pass state rx-map to allow use of `compute-reaction` for caching
+                                (run-next-event [state q]
+                                  (if (empty? q)
+                                    (post-tx ctx)
+                                    (let [ev-id (peek q)
+                                          state (rx/compute-reaction state ev-id)
+                                          c (rx/get-reaction state ev-id)]
+                                      #_(println "ev-id: " ev-id "Result: " c)
+                                      (cond
+                                        (nil? c)
+                                        (recur state (pop q))
+                                        (fn? c)
+                                        (c (fn [r]
+                                             (if (nil? r)
+                                               (run-next-event state (pop q))
+                                               (trigger-event q r))))
+                                        :else
+                                        (trigger-event q c)))))]
+                          #_(println "Events..." ev-q )
+                          (run-next-event state ev-q)))))))]
+         #_(println "Transacting... " (::db ctx-pre) "Changes..." user-changes)
+         (tx-step (-> ctx-pre
+                      (dissoc ::transaction-report ::db-hashes ::triggered-effects)           ;; Clear tx-report and db-hashes
+                      (cond->
+                          (not initialized?) append-events-to-queue)
+                      (assoc ::initialized? true)
+                      (update ::rx rx/update-root
+                              assoc
+                              ::db-pre   db-pre
+                              ::db-start db-pre
+                              ::ctx event-context)) ;; Add db-pre for event triggering
+                  user-changes))))))                                        ;; Start tx with user driven changes.
+
+
+;; ------------------------------------------------------------------------------
+;; Initialization
+;; ------------------------------------------------------------------------------
+
+;; Schema Parsing
+;; --------------
 
 (defn model-map-merge [opts macc m]
   ;; TODO: custom merge behaviour for privileged keys.
@@ -937,8 +1269,12 @@
       (cond
         (and schema collection?)
         (letfn [(create-element
-                  ([idx cb]
-                   (create-element idx {} cb))
+                  ([idx]
+                   (create-element idx {} identity))
+                  ([idx db-or-cb]
+                   (if (fn? db-or-cb)
+                     (create-element idx {} db-or-cb)
+                     (create-element idx db-or-cb identity)))
                   ([idx v cb]
                    (initialize schema v (fn [{::keys [id->path] :as el}]
                                           (-> el
@@ -1127,6 +1463,7 @@
        (add-fields-to-ctx
         (assoc initial-ctx
                ::db db
+               ;; NOTE: Set db-pre and db-start from here, trigger `resume-transaction` directly.
                ::rx (rx/create-reactive-map {::db db}))
         fields
         (fn [{::keys [async?] :as ctx}]
@@ -1141,7 +1478,8 @@
               (update ::rx add-conflicts-rx!)
               (update ::rx add-event-rxns! (:events schema []))
               (update ::rx add-effect-rxns! (:effects schema []))
-              (transact []  (or cb identity))))))
+              (initial-transact)
+              ((or cb identity))))))
      (catch #?(:clj Throwable
                :cljs js/Error) e
        (if (nil? cb)

@@ -23,24 +23,29 @@
 
 (def default-db {:a 0, :b 0, :c 0, :d 0, :e 0, :f 0, :g 0 :h {:i 0}})
 
+(defn test-events-on-db-rhs [db events changes]
+  (->
+   test-schema
+   (assoc :events events)
+   (core/initialize db)
+   (core/transact changes)
+   (select-keys [::core/db
+                 ::core/transaction-report])
+   (update ::core/transaction-report
+           select-keys
+           [:status
+            :changes
+            :event-history
+            :reason
+            :message
+            :data])
+   (update-in [::core/transaction-report :changes]
+              (partial mapv :change))))
+
 (defn test-events-on-db [db events changes result]
   (is
    (= result
-      (->
-       test-schema
-       (assoc :events events)
-       (core/initialize db)
-       (core/transact changes)
-       (select-keys [::core/db
-                     ::core/transaction-report])
-       (update ::core/transaction-report
-               select-keys
-               [:status
-                :changes
-                :event-history
-                :reason
-                :message
-                :data])))))
+      (test-events-on-db-rhs db events changes))))
 
 (def test-events (partial test-events-on-db default-db))
 
@@ -136,22 +141,17 @@
                                :event-history [:first :second]}}))
 
 (deftest exception-bubbles-up
-  ;; NOTE: Due to async changes, errors can't be thrown. They must be returned.
-  ;; TODO: add specific reason with event id to tx-report
-  (test-events-on-db
-   (dissoc default-db :a)
-   [{:inputs [:a]
-     :outputs [:b]
-     :handler (fn [{inputs :inputs}]
-                (throw (ex-info "Foo" {:test :error
-                                       :inputs inputs})))}]
-   [{:a 1}]
-   {::core/db (dissoc default-db :a)
-    ::core/transaction-report {:status :failed
-                               :reason ::core/unknown-error
-                               :message "Foo"
-                               :data {:test :error
-                                      :inputs {:a 1}}}}))
+  (let [error (ex-info "Foo" {:test :error})]
+    (is
+     (thrown?
+      clojure.lang.ExceptionInfo
+      (test-events-on-db-rhs
+       (dissoc default-db :a)
+       [{:inputs [:a]
+         :outputs [:b]
+         :handler (fn [{inputs :inputs}]
+                    (throw error))}]
+       [{:a 1}])))))
 
 
 (deftest single-unchanged-input
@@ -335,8 +335,14 @@
   (is
    (= {::core/db             (assoc default-db :a 1 :b 6)
        ::core/transaction-report {:status :complete
-                                  :changes [[::core/set-value :a 1]
-                                            [::core/set-value :b 6]]
+                                  :changes [{:change
+                                             [::core/set-value :a 1]
+                                             :id :a
+                                             :status :complete}
+                                            {:change
+                                             [::core/set-value :b 6]
+                                             :id :b
+                                             :status :complete}]
                                   :event-history [:ev]}}
       (->
        test-schema

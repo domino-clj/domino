@@ -10,7 +10,10 @@
 (deftest effects-test
   (let [data (atom nil)]
     (is (= {::core/transaction-report {:status :complete
-                                       :changes [[::core/set-value :a 1]]
+                                       :changes [{:change
+                                                  [::core/set-value :a 1]
+                                                  :id :a
+                                                  :status :complete}]
                                        :triggered-effects
                                        '(:my-effect)}}
            (-> {:model [[:a {:id :a}]]
