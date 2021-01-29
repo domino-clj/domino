@@ -25,7 +25,7 @@
                                                fname
                                                lname)})}]}))))
 
-(deftest ^:benchmark bench-transact
+(deftest ^:benchmark bench-transact-events
   (let [ctx (core/initialize
               {:model   [[:f {:id :f}
                           [:a {:id :a}]
@@ -45,3 +45,26 @@
                           :handler (fn [{{:keys [d]} :inputs}]
                                      {:a "A"})}]})]
     (criterium/bench (core/transact ctx [[::core/set-value :a 1] [::core/set-value :b 1]]))))
+
+
+(deftest ^:benchmark bench-transact-no-events
+  (let [ctx (core/initialize
+             {:model   [[:g {:id :g}]
+                        [:f {:id :f}
+                         [:a {:id :a}]
+                         [:b {:id :b}]
+                         [:c {:id :c}]
+                         [:d {:id :d}]]]
+              :events  [{:inputs  [:a :b]
+                         :outputs [:c]
+                         :handler (fn [{{:keys [a b]} :inputs}]
+                                    {:c "C"})}
+                        {:inputs  [:b :c]
+                         :outputs [:d]
+                         :handler (fn [{{:keys [b c]} :inputs}]
+                                    {:d "D"})}
+                        {:inputs  [:d]
+                         :outputs [:a]
+                         :handler (fn [{{:keys [d]} :inputs}]
+                                    {:a "A"})}]})]
+    (criterium/bench (core/transact ctx [[::core/set-value :g 2]]))))

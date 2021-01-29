@@ -57,18 +57,19 @@
   (-downstream [this]
     (keys watches))
   (-get-value [this]
-    (let [args (map
-                (fn [[_ rxn]]
-                  (-get-value rxn))
-                inputs)]
-      (println "equal? " (= args previous-fn-args) " new " args " old "
+    (let [args (into {}
+                     (map
+                      (fn [[id rxn]]
+                        [id (-get-value rxn)]))
+                     inputs)]
+      #_(println "equal? " (= args previous-fn-args) " new " args " old "
                previous-fn-args)
       (if (= args previous-fn-args)
         value
-        (let [new-v (apply rx-fn args)]
+        (let [new-v (rx-fn args)]
           (set! previous-fn-args args)
           (when (not= value new-v)
-            (println "Recomputed value" value "->" new-v)
+            #_(println "Recomputed value" value "->" new-v)
             (set! value new-v)
             (doseq [[_ watch-fn] watches]
               (when (fn? watch-fn)
@@ -81,7 +82,15 @@
   #_(-get-value [this id]
     "Returns the specified root value. Should throw if unregistered.")
   (-reset-root! [this v])
-  #_(-swap-value! [this id f]))
+
+  (-swap-root! [this f]
+    [this f a]
+    [this f a b]
+    [this f a b c]
+    [this f a b c d]
+    [this f a b c d e]
+    [this f a b c d e f]
+    [this f a b c d e f args]))
 
 
 (deftype RxMap [reactions]
@@ -94,38 +103,109 @@
   (-reset-root! [this v]
     (let [root (::root reactions)]
       (-reset! root v))
-    v))
+    v)
+  (-swap-root! [this f]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root)))))
+  (-swap-root! [this f a]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root) a))))
+  (-swap-root! [this f a b]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root) a b))))
+  (-swap-root! [this f a b c]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root) a b c))))
+  (-swap-root! [this f a b c d]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root) a b c d))))
+  (-swap-root! [this f a b c d e]
+    (let [root (::root reactions)]
+      (-reset! root (f (-get-value root) a b c d e))))
+  (-swap-root! [this fun a b c d e f]
+    (let [root (::root reactions)]
+      (-reset! root (fun (-get-value root) a b c d e f))))
+  (-swap-root! [this fun a b c d e f args]
+    (let [root (::root reactions)]
+      (-reset! root (apply fun (-get-value root) a b c d e f args)))))
 
-(defn add-reaction! [partial-rx-map {id     :id
-                                     rx-fn  :fn
-                                     inputs :inputs}]
+(defn update-root-impl
+  ([^RxMap rx f]
+   (-swap-root! rx f))
+  ([^RxMap rx f a]
+   (-swap-root! rx f a))
+  ([^RxMap rx f a b]
+   (-swap-root! rx f a b))
+  ([^RxMap rx f a b c]
+   (-swap-root! rx f a b c))
+  ([^RxMap rx f a b c d]
+   (-swap-root! rx f a b c d))
+  ([^RxMap rx f a b c d e]
+   (-swap-root! rx f a b c d e))
+  ([^RxMap rx fun a b c d e f]
+   (-swap-root! rx fun a b c d e f))
+  ([^RxMap rx fun a b c d e f & args]
+   (-swap-root! rx fun a b c d e f args)))
+
+(defn update-root! [rx f & args]
+  (apply update-root-impl rx f args)
+  rx)
+
+(defn add-reaction-impl [partial-rx-map {id     :id
+                                         rx-fn  :fn
+                                         inputs :inputs}]
   (let [watch-rxns (select-keys partial-rx-map inputs)
-        _ (do
-            (println (keys partial-rx-map))
-            (println inputs)
-            (println watch-rxns))
         new-rxn (->RxReaction
                  watch-rxns
                  rx-fn
                  {}
                  nil
-                 true)]
+                 nil)]
     (doseq [[watching rxn] watch-rxns]
-      (println "Adding watch to " watching  " for " id)
       (-add-watch rxn id :annotation
                   #_(fn [_ _]
                     (println "id " id " being notified of change to " watching)
                     (-set-maybe-changed! new-rxn))))
     (assoc partial-rx-map id new-rxn)))
 
-(defn rx-map [values-map reactions]
-  ;; TODO: Generate reactions for each of the values set.
-  (let [root (->RxRoot values-map {})
-        rx-map (reduce
-                add-reaction!
-                {::root root}
-                reactions)]
-    (->RxMap rx-map)))
+;; TODO: decide if :lazy? needs to be supported (or, conversely, if an `:eager?` option should be added.)
+
+;; Initialization & Syntactic helpers
+
+(defn infer-args-format
+  "Expects a partial rx map and a args parameter from a reaction config.
+   Based on structure of args and whether it exists in partial rx map it returns a keyword specifying the args type it expects.
+   Optionally accepts a default type as a third argument."
+  ([m args]
+   (cond
+     (map? args) :map
+     (keyword? args) :single
+     (contains? m args) :single
+     (vector? args) :vector
+     :else (throw (ex-info "Unknown args style!" {:args args}))))
+  ([m args default]
+   (cond
+     (map? args) :map
+     (keyword? args) :single
+     (contains? m args) :single
+     (vector? args) :vector
+     :else default)))
+
+(defn args->inputs
+  "Normalizes args to a canonical vector format.
+   For use in determining input reaction IDs.
+   Ensure that rx-fn is wrapped in a processing fn that will properly structure incoming args."
+  ([args-format args]
+   (case args-format
+     (:rx-map :vector)
+     args
+
+     :single
+     [args]
+
+     :map
+     (vec (vals args)))))
+
 
 ;; NOTE: Dynamic Construction
 
@@ -133,301 +213,54 @@
   (let [root (->RxRoot values-map {})]
     {::root root}))
 
-(defn get-reaction [& _])
-(defn compute-reaction [& _])
-(defn update-root [& _])
-(defn args->inputs [& _])
-(defn add-reactions! [& _])
+(defn finalize-reactive-map [reactive-map]
+  (let [rxmap
+        (->RxMap reactive-map)]
+    rxmap))
 
-;; TODO: Port order solution from `add-reactions!`
+(defn- wrap-args [args-format args rx-fn]
+  (case  args-format
+    :single (fn [m]
+              (rx-fn
+               (get m args)))
+    :rx-map rx-fn
+    :map    (fn [m]
+              (rx-fn
+               (into {}
+                     (map
+                      (fn [[k id]]
+                        [k (get m id)]))
+                     args)))
+    :vector (fn [m]
+              (apply rx-fn
+                     (mapv
+                      (partial get m)
+                      args)))
+    (throw (ex-info "Unrecognized args-format!"
+                    {:args-format args-format
+                     :args        args}))))
 
+(defn parse-rx-config
+  "Transforms a reaction config map into a standard RxReaction creation map.
+   Doesn't modify the `partial-rx-map` passed in, it is only used to match input reactions for args-format inferrence."
+  [partial-rx-map rx-config]
+  (let [args        (or (:args rx-config) (vec (:inputs rx-config)))
+        args-format (:args-format rx-config
+                                  (infer-args-format partial-rx-map args))
+        inputs      (args->inputs args-format args)
+        rx-fn       (wrap-args args-format args (:fn rx-config))]
+    {:id     (:id rx-config)
+     :inputs inputs
+     :fn     rx-fn}))
 
-;; ==============================================================================
-;; OLD
-(comment
-  ;; TODO: Enforce reaction shape to allow pattern matching for various operations!
-  ;; Example 1.
-  ;; Every patient has correlated imperial and metric heights, and is looked up by id.
-  #_{:patients [{:id 1 :name "One" :height {:cm 180 :in 70.87}} {:id 2 :name "Two" :height {:cm 160 :in 62.99}}]}
-  #_{::root
-     {:value
-      {:patients
-       [{:id 1 :name "One" :height {:cm 180 :in 70.87}}
-        {:id 2 :name "Two" :height {:cm 160 :in 62.99}}]}}
-     {:type :path
-      :static? true
-      :path [:patients]
-      :id :patients-literal}
-     {:args ::root
-      :fn (fn [db]
-            (:patients db []))
-      :value [{:id 1 :and :body} {:id 2 :and :body}]}
-
-     ;; Some generated reaction for the indexes in patients
-     {:type :indexes
-      :collection :patients-literal
-      :id :patients-indexes}
-     {:args :patients-literal
-      :args-format :single
-      :fn (fn [patients]
-            (map #(select-keys % [:id]) patients))
-      :value '({:id 1} {:id 2})}
-     ;; May want to add some generated constraint for uniqueness of indexes in patients
-
-     ;; This is where it gets hard...
-
-     ;; Now, we need a parametrized lookup
-     {:type :path
-      :static? false
-      :parameters {:patient-id :p-id}
-      :pattern [:patients {:id :patient-id}]}
-     {... ?}}
+(defn add-reaction! [reactive-map rx-config]
+  ;; TODO: process reaction by wrapping rx-fn and returning the low-level rx-config-map
+  (->> rx-config
+       (parse-rx-config reactive-map)
+       (add-reaction-impl reactive-map)))
 
 
-  ;; NOTE: may want to refactor to allow optional params to a reaction (e.g. lookup)
-  ;; NOTE: may want to look at reitit's approach of composing matchers or something?
-  ;; TODO: Create example use case from domino.core for a collection, then
-  ;;       backfill rx features.
-  ;; NOTE: for collections, allow for transitive use of params, also allow for complete set of allowed params.
-
-
-  (defn create-reactive-map [m]
-    {::root {:value m
-             :allow-set? true}
-     ::rx-matcher {}})
-
-  ;; Process for dynamic reactions:
-  ;; 1. look for static impl.
-  ;; 2. fallback to matcher and add static reification w/ watcher annotation. (annotate so that change => removal of reified rx)
-  ;; 3. if match fails, error.
-
-
-  ;; Reified-rx is of the form `[::dynamic <rx-id> <rx-params>]`
-  ;; Reified-rx has an additional key `::params` on the body which is provided on add
-  ;; Compute will reify parents
-
-  (defn run-reaction-impl [m rxn]
-    (let [input->value #(get-in m [% :value])
-          args (case (:args-format rxn :vector)
-                 :vector (mapv input->value (:args rxn))
-                 :single [(input->value (:args rxn))]
-                 :map    [(reduce-kv
-                           (fn [m k v]
-                             (assoc m k (input->value v)))
-                           {}
-                           (:args rxn))]
-                 :rx-map [(reduce
-                           (fn [m i]
-                             (assoc m i (input->value i)))
-                           {}
-                           (:args rxn))])
-          compute (:fn rxn)]
-      (assoc
-       rxn
-       :value
-       (apply compute args))))
-
-  (declare add-reaction!)
-
-  (defn dynamic-id [id params]
-    [::dynamic id params])
-
-  ;; NOTE: I don't like this very much, but maybe it's okay?
-  ;;       Let's play with it and see what we can do.
-  ;;       May potentially change it so that *all* reactions have params, but some are static.
-
-
-  (defn annotate-dynamic-reaction! [m id params]
-    (update-in m [::rx-matcher id :instances] (fnil conj #{}) (dynamic-id id params)))
-
-  (defn reify-dynamic-reaction! [m id params]
-    (let [dyn-id (dynamic-id id params)]
-      (if (contains? m dyn-id)
-        m
-        (if-let [rx-gen (get (::rx-matcher m) id)]
-          (let [rxn ((:fn rx-gen) dyn-id)
-                upstream (:inputs rxn)]
-            (-> (reduce
-                 (fn [m up]
-                   (cond
-                     (contains? m up)
-                     m
-
-                     (= ::dynamic (first up))
-                     (reify-dynamic-reaction! m (nth up 1) (nth up 2))
-
-                     :else
-                     (throw (ex-info (str "No reaction found for id: " up)
-                                     {:parent-rx (dynamic-id id params)
-                                      :missing-rx up}))))
-                 m
-                 upstream)
-                (add-reaction!
-                 rxn)
-                (annotate-dynamic-reaction!
-                 id
-                 params)))
-          (throw (ex-info (str "No dynamic reaction matches: " id)
-                          {:id id}))))))
-
-  (defn infer-args-format
-    ([m args]
-     (cond
-       (map? args) :map
-       (keyword? args) :single
-       (contains? m args) :single
-       (vector? args) :vector
-       :else (throw (ex-info "Unknown args style!" {:args args}))))
-    ([m args default]
-     (cond
-       (map? args) :map
-       (keyword? args) :single
-       (contains? m args) :single
-       (vector? args) :vector
-       :else default)))
-
-  (defn args->inputs
-    ([args-format args]
-     (case args-format
-       (:rx-map :vector)
-       args
-
-       :single
-       [args]
-
-       :map
-       (vec (vals args)))))
-
-  (defn find-reaction
-    ([m id] (get m id))
-    ([m id params]
-     (if-some [cached (get m (dynamic-id id params))]
-       cached
-       (recur
-        (reify-dynamic-reaction! m id params)
-        id
-        params))))
-
-  (defn compute-reaction
-    ([m id]
-     (let [rxn (get m id)]
-       (cond
-         (nil? rxn)
-         (throw
-          (ex-info (str "Reaction with id: " id " is not registered!")
-                   {:id id}))
-
-         (contains? rxn :value)
-         m
-
-         :else
-         (if-some [input-to-compute
-                   (->> (:inputs rxn)
-                        (map (partial get m))
-                        (some #(when-not (contains? % :value) %)))]
-           (-> m
-               (compute-reaction input-to-compute)
-               (compute-reaction id))
-           (if (nil? (:fn rxn))
-             (throw
-              (ex-info
-               (str "No function defined for reaction: " id "!")
-               {:reaction rxn
-                :id id}))
-             (update m id
-                     (partial run-reaction-impl m)))))))
-    ([m id params]
-     (compute-reaction (reify-dynamic-reaction! m id params) (dynamic-id id params))))
-
-  (defn compute-reaction!
-    ([m id] ;; TODO: update to clear only for passed params
-     (-> m
-         (update id dissoc :value)
-         (compute-reaction id)))
-    ([m id params]
-     (-> m
-         (update [::dynamic id params] dissoc :value)
-         (compute-reaction id params))))
-
-  (defn get-reaction
-    ([m id]
-     (if-let [rxn (get m id)]
-       (if (contains? rxn :value)
-         (:value rxn)
-         (get-reaction (compute-reaction m id) id))
-       (throw (ex-info (str "Reaction with id: " id " is not registered!")
-                       {:id id}))))
-    ([m id params]
-     (get-reaction (compute-reaction m id params) (dynamic-id id params))))
-
-  ;; TODO get-reaction with parameters!
-
-
-
-  ;; TODO: get-upstream
-  ;; TODO: get-downstream
-  ;; TODO: print-graph
-  ;; NOTE: Should we enforce `::root` as the single changeable point?
-  ;;       (i.e. any other 'root' like things would be convenience fns around top-level keys)
-  ;; TODO: allow for nested/dependent reactions. (i.e. one reaction for each element in a collection)
-
-
-  (defn- annotate-inputs [m id inputs f] ;; TODO: does this need to change for dynamic queries?
-    (reduce
-     (fn [m input]
-       (if (contains? m input)
-         (update m input update :watchers (fnil conj #{}) id)
-         (throw (ex-info
-                 (str "Failed to add reaction: " id "\nInput reaction: " input " is not registered!")
-                 {:id id
-                  :inputs inputs
-                  :missing-reaction input}))))
-     m
-     inputs))
-
-  (defn add-reaction! ;; TODO: add description of parametrization
-    ([m rx]
-     (add-reaction! m (:id rx) (:args rx) (:fn rx) (dissoc rx
-                                                           :id
-                                                           :inputs
-                                                           :fn)))
-    ([m id f]
-     (add-reaction! m id ::root f {:args-format :single}))
-    ([m id args f]
-     (add-reaction! m id args f {}))
-    ([m id args f opts]
-     (let [args-format (or (:args-format opts)
-                           (infer-args-format m args))
-           inputs (args->inputs args-format args)]
-       (-> m
-           (annotate-inputs id inputs f)
-           (assoc id (merge
-                      opts
-                      {:id id
-                       :args-format args-format
-                       :args args
-                       :inputs inputs
-                       ;; Order invariant is for computation of inputs. It ensures that new computations are resolved in proper order.
-                       ;; It is the largest of the order invariants of it's inputs, plus one.
-                       ;; This means that if all triggered changes with lower order invariant have been computed,
-                       ;;   then all triggered parents must've been computed.
-                       ;; Additionally, any changes triggered must have a higher order invariant.
-                       :order-invariant
-                       (inc
-                        (reduce
-                         (fnil max 0 0)
-                         0
-                         (map (comp :order-invariant (partial get m)) inputs)))
-                       :parents (reduce into #{} (map (fn [i]
-                                                        (conj
-                                                         (:parents (get m i) #{})
-                                                         i))
-                                                      inputs))
-                       :fn f}))
-           (cond->
-               (not (:lazy? opts)) (compute-reaction id))))))
-
-  (defn add-reactions! [reactive-map reactions]
+(defn add-reactions! [reactive-map reactions]
     (let [get-inputs (fn [m rxn]
                        ;; NOTE: since infer-args-format is based on a complete map, we must set a default
                        (args->inputs
@@ -470,54 +303,9 @@
                      (dissoc blocking (:id rxn))
                      (into ready (subvec rxns 1)))))))))
 
-  (defn clear-watchers [m trigger-id] ;; TODO: clear watchers based on params associated with change.
-    (let [rxn (get m trigger-id)
-          add-ids-by-invariant (partial reduce
-                                        (fn [acc id]
-                                          (update acc
-                                                  (:order-invariant
-                                                   (get m id)
-                                                   0)
-                                                  (fnil conj #{})
-                                                  id)))]
-      (loop [m m
-             triggered-by-order-invariant (add-ids-by-invariant (sorted-map) (:watchers rxn))]
-        (if (empty? triggered-by-order-invariant)
-          m
-          (let [[k triggered] (first triggered-by-order-invariant)
-                [m sorted-triggers]
-                (reduce
-                 ;; NOTE: we should clean up dynamic reactions which are stale somewhere.
-                 (fn [[m sorted-triggers] id]
-                   (let [{:keys [lazy? value watchers] :as inner-rxn} (get m id)]
-                     (if lazy?
-                       [(-> m
-                            (update id dissoc :value))
-                        (add-ids-by-invariant sorted-triggers watchers)]
-                       (let [m (compute-reaction! m id)]
-                         (if (= (get-reaction m id) value)
-                           [m sorted-triggers]
-                           [m (add-ids-by-invariant sorted-triggers watchers)])))))
-                 [m (dissoc triggered-by-order-invariant k)]
-                 triggered)]
-            (recur m sorted-triggers))))))
+(defn get-reaction [^RxMap rx-map rx-id]
+  (-get-reaction rx-map rx-id))
 
-  (defn set-value
-    ([m v]
-     (set-value m ::root v))
-    ([m id v]
-     (let [rxn (get m id)]
-       (if (not (:allow-set? rxn))
-         (throw (ex-info (str "Attempted to call `set-value` on a reaction where it is not explicitly allowed!\n"
-                              "Set `:allow-set?` to true on reaction: " id " if this is desired.")
-                         {:reaction rxn
-                          :id id}))
-         (-> m
-             (update id assoc :value v)
-             (clear-watchers id))))))
-
-  (defn update-root [m f & args]
-    (set-value m ::root (apply f (get-reaction m ::root) args)))
-
-  (defn update-value [m id f & args]
-    (set-value m id (apply f (get-reaction m id) args))))
+(defn compute-reaction [rx-map _]
+  #_(println "This function is deprecated. get-reaction will do neccessary computations only once.")
+  rx-map)
