@@ -844,12 +844,12 @@
 (defn schema-is-async? [schema]
   (boolean (some :async? (:events schema))))
 
-(defn add-fields-to-ctx [{::keys [subcontexts] :as ctx} [field :as fields] on-complete]
+(defn add-fields-to-ctx [{::keys [subcontexts] :as ctx} [field :as fields]]
 
   ;; Reduces over fields
   ;;
   (if (empty? fields)
-    (on-complete ctx)
+    ctx
     (let [[id {::keys [path] :keys [collection? parents schema index-id] :as m}] field
           ;; TODO: rewrite to use subcontext
           {::keys [db subcontexts] :as ctx}
@@ -889,59 +889,54 @@
         (and schema collection?)
         (letfn [(create-element
                   ([idx]
-                   (create-element idx {} identity))
-                  ([idx db-or-cb]
-                   (if (fn? db-or-cb)
-                     (create-element idx {} db-or-cb)
-                     (create-element idx db-or-cb identity)))
-                  ([idx v cb]
-                   (initialize schema v (fn [{::keys [id->path] :as el}]
-                                          (-> el
-                                              (update ::db
-                                                      assoc-in
-                                                      (id->path index-id [::index])
-                                                      idx)
-                                              cb)))))
-                (add-element-to-ctx [ctx idx v cb]
-                  (create-element idx v
-                                  (fn [el]
-                                    (-> ctx
-                                        (assoc-in [::subcontexts id ::elements idx] el)
-                                        (update ::db
-                                                (fn [m p v]
-                                                  (if (empty? v)
-                                                    (dissoc-in m p)
-                                                    (assoc-in m p v)))
-                                                (conj path idx)
-                                                (::db el))
-                                        cb))))
-                (add-elements-to-ctx [ctx [[k v] :as kvs] cb]
-                  (if (empty? kvs)
-                    (cb ctx)
-                    (add-element-to-ctx ctx k v #(add-elements-to-ctx % (rest kvs) cb))))]
+                   (create-element idx {}))
+                  ([idx v]
+                   (let [el (initialize schema v)]
+
+                     (update el
+                             ::db
+                             assoc-in
+                             ((::id->path el) index-id [::index])
+                             idx))))
+                (add-element-to-ctx [ctx idx v]
+                  (let [el (create-element idx v)]
+                    (-> ctx
+                        (assoc-in [::subcontexts id ::elements idx] el)
+                        (update ::db
+                                (fn [m p v]
+                                  (if (empty? v)
+                                    (dissoc-in m p)
+                                    (assoc-in m p v)))
+                                (conj path idx)
+                                (::db el)))))
+                (add-elements-to-ctx [ctx kvs]
+                  (reduce
+                   (fn [acc [k v]]
+                     (add-element-to-ctx acc k v))
+                   ctx
+                   kvs))]
           (-> ctx
               (update ::subcontexts update id assoc
                       ::create-element create-element)
 
               (add-elements-to-ctx
-               (vec (get-in db path))
-               #(add-fields-to-ctx % (rest fields) on-complete))))
+               (vec (get-in db path)))
+              (recur (rest fields))))
 
         schema
-        (initialize schema (get-in db path)
-                    (fn [el]
-                      (-> ctx
-                          (update ::subcontexts (fnil assoc {}) id el)
-                          (update ::db
-                                  (fn [m p v]
-                                    (if (empty? v)
-                                      (dissoc-in m p)
-                                      (assoc-in m p v)))
-                                  path
-                                  (::db el))
-                          (add-fields-to-ctx (rest fields) on-complete))))
+        (let [el (initialize schema (get-in db path))]
+          (-> ctx
+              (update ::subcontexts (fnil assoc {}) id el)
+              (update ::db
+                      (fn [m p v]
+                        (if (empty? v)
+                          (dissoc-in m p)
+                          (assoc-in m p v)))
+                      path
+                      (::db el))
+              (recur (rest fields))))
         :else
-        (recur ctx (rest fields) on-complete)))))
+        (recur ctx (rest fields))))))
 
 (defn deep-relationships [rel-map]
   (letfn [(add-relationship [m src ds]
@@ -1065,46 +1060,32 @@
 
 (defn initialize
   ([schema]
-   (initialize schema {} nil))
-  ([schema cb-or-db]
-   (if (map? cb-or-db)
-     (initialize schema cb-or-db nil)
-     (initialize schema {} cb-or-db)))
-  ([schema initial-db cb]
+   (initialize schema {}))
+  ([schema initial-db]
    #_(println "Initializing...")
-   (try
-     (let [{::keys [fields db-initializers schema] :as initial-ctx}
-           (pre-initialize schema)
-           ;; NOTE: db-initializers are in field order, which is top-down.
-           ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
-           db (apply-db-initializers initial-db db-initializers)]
-
-       (add-fields-to-ctx
-        (assoc initial-ctx
-               ::db db
-               ;; NOTE: Set db-pre and db-start from here, trigger `resume-transaction` directly.
-               ::rx (rx/create-reactive-map {::db db}))
-        fields
-        (fn [{::keys [async?] :as ctx}]
-          (when (and async? (nil? cb))
-            (throw (ex-info "Schema is async, but no callback was provided!"
-                            {:schema schema
-                             :async? async?})))
-          (-> ctx
-              (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
-              (update ::rx rx/add-reactions! (into (::reactions ctx [])
-                                                   (parse-reactions schema)))
-              (update ::rx add-conflicts-rx!)
-              (update ::rx add-event-rxns! (:events schema []))
-              (update ::rx add-effect-rxns! (:effects schema []))
-              (update ::rx rx/finalize-reactive-map)
-              (initial-transact)
-              ((or cb identity))))))
-     (catch #?(:clj Throwable
-               :cljs js/Error) e
-       (if (nil? cb)
-         (throw e)
-         (cb e))))))
+   (let [{::keys [fields db-initializers schema async] :as initial-ctx}
+         (pre-initialize schema)
+         ;; NOTE: db-initializers are in field order, which is top-down.
+         ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
+         db (apply-db-initializers initial-db db-initializers)
+         {::keys [async?] :as ctx} (-> initial-ctx
+                                       (assoc ::db db
+                                              ;; NOTE: Set db-pre and db-start from here, trigger `resume-transaction` directly.
+                                              ::rx (rx/create-reactive-map {::db db}))
+                                       (add-fields-to-ctx fields))]
+     (when async?
+       (throw (ex-info "Schema is async, but no callback was provided!"
+                       {:schema schema
+                        :async? async?})))
+     (-> ctx
+         (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
+         (update ::rx rx/add-reactions! (into (::reactions ctx [])
+                                              (parse-reactions schema)))
+         (update ::rx add-conflicts-rx!)
+         (update ::rx add-event-rxns! (:events schema []))
+         (update ::rx add-effect-rxns! (:effects schema []))
+         (update ::rx rx/finalize-reactive-map)
+         (initial-transact)))))
 
 (defn trigger-effects
   ([ctx triggers]
