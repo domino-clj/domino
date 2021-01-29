@@ -21,7 +21,9 @@
   (-add-watch [this key f])
   (-upstream [this])
   (-downstream [this])
-  (-get-value [this]))
+  (-get-value [this])
+  (-stale? [this])
+  (-mark-stale! [this]))
 
 (defprotocol IRxResettable
   (-reset! [this new-v]))
@@ -37,6 +39,8 @@
     (keys watches))
   (-get-value [this]
     value)
+  (-stale? [this] false)
+  (-mark-stale! [this])
 
   IRxResettable
   (-reset! [this new-v]
@@ -47,7 +51,7 @@
           (watch-fn value new-v))))
     new-v))
 
-(deftype RxReaction [inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args]
+(deftype RxReaction [inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args ^:volatile-mutable stale?]
   IDominoReaction
   (-add-watch [this key f]
     (set! watches
@@ -57,24 +61,29 @@
   (-downstream [this]
     (keys watches))
   (-get-value [this]
-    (let [args (into {}
-                     (map
-                      (fn [[id rxn]]
-                        [id (-get-value rxn)]))
-                     inputs)]
-      #_(println "equal? " (= args previous-fn-args) " new " args " old "
-               previous-fn-args)
-      (if (= args previous-fn-args)
-        value
-        (let [new-v (rx-fn args)]
-          (set! previous-fn-args args)
-          (when (not= value new-v)
-            #_(println "Recomputed value" value "->" new-v)
-            (set! value new-v)
-            (doseq [[_ watch-fn] watches]
-              (when (fn? watch-fn)
-                (watch-fn value new-v))))
-          new-v)))))
+    (if-not stale?
+      value
+      (let [args (into {}
+                       (map
+                        (fn [[id rxn]]
+                          [id (-get-value rxn)]))
+                       inputs)]
+        #_(println "equal? " (= args previous-fn-args) " new " args " old "
+                   previous-fn-args)
+        (set! stale? false)
+        (if (= args previous-fn-args)
+          value
+          (let [new-v (rx-fn args)]
+            (set! previous-fn-args args)
+            (when (not= value new-v)
+              #_(println "Recomputed value" value "->" new-v)
+              (set! value new-v)
+              (doseq [[_ watch-fn] watches]
+                (when (fn? watch-fn)
+                  (watch-fn value new-v))))
+            new-v)))))
+  (-stale? [this] stale?)
+  (-mark-stale! [this] (set! stale? true)))
 
 (defprotocol IDominoRxMap
   (-get-reaction [this id]
@@ -103,31 +112,33 @@
   (-reset-root! [this v]
     (let [root (::root reactions)]
       (-reset! root v))
+    (doseq [rx (vals reactions)]
+      (-mark-stale! rx))
     v)
   (-swap-root! [this f]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root)))))
+      (-reset-root! this (f (-get-value root)))))
   (-swap-root! [this f a]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root) a))))
+      (-reset-root! this (f (-get-value root) a))))
   (-swap-root! [this f a b]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root) a b))))
+      (-reset-root! this (f (-get-value root) a b))))
   (-swap-root! [this f a b c]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root) a b c))))
+      (-reset-root! this (f (-get-value root) a b c))))
   (-swap-root! [this f a b c d]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root) a b c d))))
+      (-reset-root! this (f (-get-value root) a b c d))))
   (-swap-root! [this f a b c d e]
     (let [root (::root reactions)]
-      (-reset! root (f (-get-value root) a b c d e))))
+      (-reset-root! this (f (-get-value root) a b c d e))))
   (-swap-root! [this fun a b c d e f]
     (let [root (::root reactions)]
-      (-reset! root (fun (-get-value root) a b c d e f))))
+      (-reset-root! this (fun (-get-value root) a b c d e f))))
   (-swap-root! [this fun a b c d e f args]
     (let [root (::root reactions)]
-      (-reset! root (apply fun (-get-value root) a b c d e f args)))))
+      (-reset-root! this (apply fun (-get-value root) a b c d e f args)))))
 
 (defn update-root-impl
   ([^RxMap rx f]
@@ -160,7 +171,8 @@
                  rx-fn
                  {}
                  nil
-                 nil)]
+                 nil
+                 true)]
     (doseq [[watching rxn] watch-rxns]
       (-add-watch rxn id :annotation
                   #_(fn [_ _]
