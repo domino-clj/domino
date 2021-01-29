@@ -88,8 +88,7 @@
 (defprotocol IDominoRxMap
   (-get-reaction [this id]
     "Finds the value for the registered reaction. Should throw if unregistered.")
-  #_(-get-value [this id]
-    "Returns the specified root value. Should throw if unregistered.")
+
   (-reset-root! [this v])
 
   (-swap-root! [this f]
@@ -160,6 +159,10 @@
 
 (defn update-root! [rx f & args]
   (apply update-root-impl rx f args)
+  rx)
+
+(defn reset-root! [rx v]
+  (-reset-root! rx v)
   rx)
 
 (defn add-reaction-impl [partial-rx-map {id     :id

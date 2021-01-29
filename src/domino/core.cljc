@@ -477,13 +477,14 @@
                                                         event-history)
                          :true (assoc :status :complete)))))))))
 
-(defn change-is-async? [ctx [op [id idx?] :as change]]
-  (and (= ::update-child op)
-       (-> ctx ::subcontexts id ::async?)))
+(defn change-is-async? [ctx change]
+  (and (= ::update-child (first change))
+       (-> ctx ::subcontexts (first (second change)) ::async?)))
 
 (declare transact-async initialize-async)
 
-(defn update-child-async [ctx on-success on-fail])
+(defn update-child-async [ctx on-success on-fail]
+  (on-fail (ex-info "NOT IMPLEMENTED" {:changes changes})))
 
 (defn resume-transaction-async
   [{db-pre ::db
@@ -497,7 +498,8 @@
   (if (not-empty changes)
     ;; 1. resolve changes
     (if (change-is-async? ctx-pre (first changes))
-      (on-fail (ex-info "NOT IMPLEMENTED" {:changes changes}))
+      (update-child-async (assoc ::pending-changes (rest changes))
+                          #(resume-transaction-async % on-success on-fail) on-fail)
       (-> ctx-pre
           (assoc ::pending-changes (rest changes))
           (resolve-change (first changes))
@@ -572,6 +574,20 @@
                 ;; ::ctx allows for reactions to pull data from the context itself
                 ::ctx (::event-context ctx))
         (resume-transaction)))
+
+(defn initial-transact-async [ctx on-success on-fail]
+  (-> ctx
+      clear-transaction-data
+      append-events-to-queue
+      (update ::rx rx/update-root!
+              assoc
+              ;; ::db-pre preserves db state from beginning of each transaction step.
+              ::db-pre   nil
+              ;; ::db-start preserves db state from beginning of transaction
+              ::db-start nil
+              ;; ::ctx allows for reactions to pull data from the context itself
+              ::ctx (::event-context ctx))
+      (resume-transaction-async on-success on-fail)))
 
 (defn transact
   ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes]
@@ -1152,34 +1168,53 @@
    db
    inits))
 
+(defn- initialize-impl
+  [schema]
+  (let [{::keys [fields schema] :as initial-ctx}
+        (pre-initialize schema)
+        ;; NOTE: db-initializers are in field order, which is top-down.
+        ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
+        ctx (-> initial-ctx
+                (assoc ::rx (rx/create-reactive-map {}))
+                ;; TODO: Update add-fields-to-ctx
+                ;;       so that it doesn't call initialize, but just calls initialize-impl instead.
+                ;;       When DB is set at top level, propagate changes to subcontexts which already exist.
+                (add-fields-to-ctx fields))]
+
+
+                         (-> ctx
+                             (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
+                             (update ::rx rx/add-reactions! (into (::reactions ctx [])
+                                                                  (parse-reactions schema)))
+                             (update ::rx add-conflicts-rx!)
+                             (update ::rx add-event-rxns! (:events schema []))
+                             (update ::rx add-effect-rxns! (:effects schema []))
+                             (update ::rx rx/finalize-reactive-map))))
+
 (defn initialize
   ([schema]
    (initialize schema {}))
   ([schema initial-db]
-   #_(println "Initializing...")
-   (let [{::keys [fields db-initializers schema async] :as initial-ctx}
-         (pre-initialize schema)
-         ;; NOTE: db-initializers are in field order, which is top-down.
-         ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
-         db (apply-db-initializers initial-db db-initializers)
-         {::keys [async?] :as ctx} (-> initial-ctx
-                                       (assoc ::db db
-                                              ;; NOTE: Set db-pre and db-start from here, trigger `resume-transaction` directly.
-                                              ::rx (rx/create-reactive-map {::db db}))
-                                       (add-fields-to-ctx fields))]
-     (when async?
+   (let [ctx (initialize-impl schema)
+         db (apply-db-initializers initial-db (::db-initializers ctx))]
+     (when (::async? ctx)
        (throw (ex-info "Schema is async, but no callback was provided!"
                        {:schema schema
-                        :async? async?})))
+                        :async? (::async? ctx)})))
      (-> ctx
-         (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
-         (update ::rx rx/add-reactions! (into (::reactions ctx [])
-                                              (parse-reactions schema)))
-         (update ::rx add-conflicts-rx!)
-         (update ::rx add-event-rxns! (:events schema []))
-         (update ::rx add-effect-rxns! (:effects schema []))
-         (update ::rx rx/finalize-reactive-map)
+         (assoc ::db db)
+         (update ::rx rx/reset-root! {::db db})
+         ;; TODO: Initial-transact on subcontexts if required
          (initial-transact)))))
+
+(defn initialize-async
+  ([schema initial-db on-success on-fail]
+   (let [ctx (initialize-impl schema)
+         db (apply-db-initializers initial-db (::db-initializers ctx))]
+     (-> ctx
+         (assoc ::db db)
+         (update ::rx rx/reset-root! {::db db})
+         (initial-transact-async on-success on-fail)))))
 
 (defn trigger-effects
   ([ctx triggers]
