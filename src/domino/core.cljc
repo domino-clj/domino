@@ -477,6 +477,88 @@
                                                         event-history)
                          :true (assoc :status :complete)))))))))
 
+(defn change-is-async? [ctx [op [id idx?] :as change]]
+  (and (= ::update-child op)
+       (-> ctx ::subcontexts id ::async?)))
+
+(declare transact-async initialize-async)
+
+(defn update-child-async [ctx on-success on-fail])
+
+(defn resume-transaction-async
+  [{db-pre ::db
+    event-context ::event-context
+    changes ::pending-changes
+    :as ctx-pre}
+   on-success
+   on-fail]
+  ;; DO THE TRANSACTION
+
+  (if (not-empty changes)
+    ;; 1. resolve changes
+    (if (change-is-async? ctx-pre (first changes))
+      (on-fail (ex-info "NOT IMPLEMENTED" {:changes changes}))
+      (-> ctx-pre
+          (assoc ::pending-changes (rest changes))
+          (resolve-change (first changes))
+          ;; NOTE: recur may be replaced by `resume-transaction` continuation
+          (recur on-success on-fail)))
+    ;; 2. Handle the results of change resolution
+    (let [ctx
+          (if (db-changed? ctx-pre)
+            (-> ctx-pre
+                ;; 2a) Update reactive-map's `::db` and `::db-pre` to recompute relevant reactions.
+                (update-rx)
+                ;; 2b) reads the `::events` special reaction and adds triggered events to the queue
+                (append-events-to-queue)
+                ;; 2c) Adds the latest db-hash, erroring if duplicate
+                (append-db-hash!))
+            ctx-pre)
+          ;; 3. Check Conflicts and Events
+          resolution-changeset (get-resolution-changeset! ctx)
+          event-queue          (::event-queue ctx)]
+      (cond
+        ;; Resolve conflicts if they exist.
+        (not-empty resolution-changeset)
+        (-> ctx
+            (assoc ::pending-changes
+                   (parse-changes ctx resolution-changeset))
+            (recur on-success on-fail))
+        ;; Resolve an event if it is present
+        (not-empty event-queue)
+        (let [event-id (peek event-queue)
+              c (rx/get-reaction (::rx ctx) event-id)]
+          ;; NOTE: this is where async may be needed. Currently, event returns a fn.
+          ;; TODO: async!
+          (if (fn? c)
+            (on-fail (ex-info "NOT IMPLEMENTED" {:event-id event-id}))
+            (cond-> ctx
+              (some? c)  (->
+                          (update ::event-history   (fnil conj []) (peek event-queue))
+                          (assoc  ::pending-changes (parse-changes ctx [c])))
+              true       (->
+                          (update ::event-queue pop)
+                          (recur on-success on-fail)))))
+        ;; Otherwise, we're done!
+        :else
+        (let [triggered-effects (trigger-output-effects! ctx) ;; NOTE: consider failure case for async here
+              event-history     (::event-history ctx)]
+          (-> ctx
+              (dissoc ::db-hashes
+                      ::event-queue
+                      ::event-history
+                      ::pending-changes)
+              (assoc
+               ::triggered-effects triggered-effects)
+              (update ::transaction-report
+                      #(cond-> %
+                         (seq triggered-effects) (assoc :triggered-effects
+                                                        triggered-effects)
+                         (seq event-history)     (assoc :event-history
+                                                        event-history)
+                         :true (assoc :status :complete)))
+              (on-success)))))))
+
 (defn initial-transact [ctx]
     (-> ctx
         clear-transaction-data
@@ -492,13 +574,7 @@
         (resume-transaction)))
 
 (defn transact
-  ([ctx user-changes]
-   (if (::async? ctx)
-     (throw (ex-info "Schema is async, but no callback was provided!"
-                     {:schema (::schema ctx)
-                      :async? (::async? ctx)}))
-     (transact ctx user-changes identity)))
-  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes cb]
+  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes]
    (-> ctx-pre
        clear-transaction-data
 
@@ -512,6 +588,24 @@
                ::ctx event-context)
        (assoc ::pending-changes (parse-changes ctx-pre user-changes))
        (resume-transaction))))
+
+(defn transact-async
+  ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes on-success on-fail]
+   (-> ctx-pre
+       clear-transaction-data
+
+       (update ::rx rx/update-root!
+               assoc
+               ;; ::db-pre preserves db state from beginning of each transaction step.
+               ::db-pre   db-pre
+               ;; ::db-start preserves db state from beginning of transaction
+               ::db-start db-pre
+               ;; ::ctx allows for reactions to pull data from the context itself
+               ::ctx event-context)
+       (assoc ::pending-changes (parse-changes ctx-pre user-changes))
+       (resume-transaction-async on-success on-fail))))
+
+
 
 ;; ------------------------------------------------------------------------------
 ;; Initialization
