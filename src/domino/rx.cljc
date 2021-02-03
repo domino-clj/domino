@@ -1,5 +1,6 @@
 (ns domino.rx
-  (:require [clojure.set :refer [union]]))
+  (:require [clojure.set :refer [union]]
+            [clojure.pprint]))
 
 ;; ==============================================================================
 ;; ABOUT
@@ -18,7 +19,8 @@
 ;; NEW
 
 (defprotocol IDominoReaction
-  (-add-watch [this key f])
+  (-add-watch    [this key f])
+  (-remove-watch [this key])
   (-upstream [this])
   (-downstream [this])
   (-get-value [this])
@@ -33,6 +35,9 @@
   (-add-watch [this key f]
     (set! watches
           (assoc watches key f)))
+  (-remove-watch [this key]
+    (set! watches
+          (dissoc watches key)))
   (-upstream [this]
     nil)
   (-downstream [this]
@@ -51,11 +56,15 @@
           (watch-fn value new-v))))
     new-v))
 
+
 (deftype RxReaction [inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args ^:volatile-mutable stale?]
   IDominoReaction
   (-add-watch [this key f]
     (set! watches
           ((fnil assoc {}) watches key f)))
+  (-remove-watch [this key]
+    (set! watches
+          (dissoc watches key)))
   (-upstream [this]
     (keys inputs))
   (-downstream [this]
@@ -66,11 +75,13 @@
       (let [args (into {}
                        (map
                         (fn [[id rxn]]
+                          ;; NOTE: I think we broke inputs!
                           [id (-get-value rxn)]))
                        inputs)]
         #_(println "equal? " (= args previous-fn-args) " new " args " old "
                    previous-fn-args)
         (set! stale? false)
+
         (if (= args previous-fn-args)
           value
           (let [new-v (rx-fn args)]
@@ -87,7 +98,9 @@
 
 (defprotocol IDominoRxMap
   (-get-reaction [this id]
-    "Finds the value for the registered reaction. Should throw if unregistered.")
+    "Finds the registered reaction. Should throw if unregistered.")
+  (-add-reaction! [this rx-config])
+  (-remove-reaction! [this rx-id cascade?])
 
   (-reset-root! [this v])
 
@@ -105,9 +118,48 @@
   IDominoRxMap
   (-get-reaction [this id]
     (if-some [rx (get reactions id)]
-      (-get-value rx)
+      rx
       (throw (ex-info "Reaction is not registered!"
                       {:reaction-id id}))))
+  (-add-reaction! [this {rx-fn :fn :keys [id inputs] :as rx-config}]
+    (let [watch-rxns (select-keys reactions inputs)
+          rxn (->RxReaction
+               watch-rxns
+               rx-fn
+               {}
+               nil
+               nil
+               true)]
+      (doseq [[watching rxn] watch-rxns]
+        (-add-watch rxn id :annotation))
+      (RxMap. (assoc reactions
+                     id
+                     rxn))))
+  (-remove-reaction! [this rx-id cascade?]
+    (RxMap.
+     (if cascade?
+       (loop [rxns       reactions
+              [id & ids] rx-id]
+         (let [rx-to-remove (get rxns id)
+               unwatch-ids  (-upstream rx-to-remove)
+               downstream   (distinct (concat ids (-downstream rx-to-remove)))]
+           (doseq [unwatch-id unwatch-ids]
+             (some->
+              (get rxns unwatch-id)
+              (-remove-watch id)))
+           (if (seq ids)
+             (recur (dissoc rxns id) ids)
+             (dissoc rxns id))))
+       (let [rx-to-remove (get reactions rx-id)]
+         (when-some [downstream (seq (-downstream rx-to-remove))]
+           (throw (ex-info "Cannot remove reaction due to downstream reactions."
+                           {:rx-id rx-id
+                            :downstream downstream})))
+         (doseq [unwatch-id (-upstream rx-to-remove)]
+           (some->
+            (get reactions unwatch-id)
+            (-remove-watch rx-id)))
+         (dissoc reactions rx-id)))))
   (-reset-root! [this v]
     (let [root (::root reactions)]
       (-reset! root v))
@@ -165,24 +217,6 @@
   (-reset-root! rx v)
   rx)
 
-(defn add-reaction-impl [partial-rx-map {id     :id
-                                         rx-fn  :fn
-                                         inputs :inputs}]
-  (let [watch-rxns (select-keys partial-rx-map inputs)
-        new-rxn (->RxReaction
-                 watch-rxns
-                 rx-fn
-                 {}
-                 nil
-                 nil
-                 true)]
-    (doseq [[watching rxn] watch-rxns]
-      (-add-watch rxn id :annotation
-                  #_(fn [_ _]
-                    (println "id " id " being notified of change to " watching)
-                    (-set-maybe-changed! new-rxn))))
-    (assoc partial-rx-map id new-rxn)))
-
 ;; TODO: decide if :lazy? needs to be supported (or, conversely, if an `:eager?` option should be added.)
 
 ;; Initialization & Syntactic helpers
@@ -226,12 +260,7 @@
 
 (defn create-reactive-map [values-map]
   (let [root (->RxRoot values-map {})]
-    {::root root}))
-
-(defn finalize-reactive-map [reactive-map]
-  (let [rxmap
-        (->RxMap reactive-map)]
-    rxmap))
+    (->RxMap {::root root})))
 
 (defn- wrap-args [args-format args rx-fn]
   (case  args-format
@@ -258,10 +287,10 @@
 (defn parse-rx-config
   "Transforms a reaction config map into a standard RxReaction creation map.
    Doesn't modify the `partial-rx-map` passed in, it is only used to match input reactions for args-format inferrence."
-  [partial-rx-map rx-config]
+  [m rx-config]
   (let [args        (or (:args rx-config) (vec (:inputs rx-config)))
         args-format (:args-format rx-config
-                                  (infer-args-format partial-rx-map args))
+                                  (infer-args-format m args))
         inputs      (args->inputs args-format args)
         rx-fn       (wrap-args args-format args (:fn rx-config))]
     {:id     (:id rx-config)
@@ -271,8 +300,8 @@
 (defn add-reaction! [reactive-map rx-config]
   ;; TODO: process reaction by wrapping rx-fn and returning the low-level rx-config-map
   (->> rx-config
-       (parse-rx-config reactive-map)
-       (add-reaction-impl reactive-map)))
+       (parse-rx-config (.reactions reactive-map))
+       (-add-reaction! reactive-map)))
 
 
 (defn add-reactions! [reactive-map reactions]
@@ -280,7 +309,7 @@
                        ;; NOTE: since infer-args-format is based on a complete map, we must set a default
                        (args->inputs
                         (or (:args-format rxn)
-                            (infer-args-format m (:args rxn) :single))
+                            (infer-args-format (.reactions m) (:args rxn) :single))
                         (:args rxn)))]
       (loop [m reactive-map
              blocked {}
@@ -295,7 +324,7 @@
           (if-let [blocks (not-empty
                            (set
                             (remove
-                             (partial contains? m)
+                             (partial contains? (.reactions m))
                              (get-inputs m rxn))))]
             (recur m
                    (assoc blocked rxn blocks)
@@ -319,7 +348,11 @@
                      (into ready (subvec rxns 1)))))))))
 
 (defn get-reaction [^RxMap rx-map rx-id]
-  (-get-reaction rx-map rx-id))
+  (if-let [rxn (-get-reaction rx-map rx-id)]
+    (-get-value rxn)
+    (throw (ex-info "No Reaction for id."
+                    {:id rx-id
+                     :reactions (.reactions rx-map)}))))
 
 (defn compute-reaction [rx-map _]
   #_(println "This function is deprecated. get-reaction will do neccessary computations only once.")

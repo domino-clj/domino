@@ -191,7 +191,7 @@
 ;; ------------------------------------------------------------------------------
 ;; Change Handling
 
-(declare initial-transact transact)
+(declare pre-initialize initialize-impl post-initialize post-initialize-async initial-transact transact)
 
 (defn prevent-change-to-final! [ctx change]
   (let [id (if (#{::set-value ::remove-value} (first change))
@@ -484,7 +484,7 @@
 (declare transact-async initialize-async)
 
 (defn update-child-async [ctx on-success on-fail]
-  (on-fail (ex-info "NOT IMPLEMENTED" {:changes changes})))
+  (on-fail (ex-info "NOT IMPLEMENTED" {:changes (::changes ctx)})))
 
 (defn resume-transaction-async
   [{db-pre ::db
@@ -561,31 +561,38 @@
                          :true (assoc :status :complete)))
               (on-success)))))))
 
-(defn initial-transact [ctx]
-    (-> ctx
-        clear-transaction-data
-        append-events-to-queue
-        (update ::rx rx/update-root!
-                assoc
-                ;; ::db-pre preserves db state from beginning of each transaction step.
-                ::db-pre   nil
-                ;; ::db-start preserves db state from beginning of transaction
-                ::db-start nil
-                ;; ::ctx allows for reactions to pull data from the context itself
-                ::ctx (::event-context ctx))
-        (resume-transaction)))
+(defn apply-db-initializers [db inits]
+  (reduce
+   (fn [db init]
+     (init db))
+   db
+   inits))
 
-(defn initial-transact-async [ctx on-success on-fail]
+(defn initialize-db [ctx initial-db]
+  (let [db (apply-db-initializers initial-db (::db-initializers ctx))]
+    (-> ctx
+        (assoc ::db db)
+        (update ::rx rx/reset-root! {::db       db
+                                     ::db-pre   nil
+                                     ::db-start nil}))))
+
+(defn initial-transact [ctx db]
   (-> ctx
+      (initialize-db db)
       clear-transaction-data
       append-events-to-queue
       (update ::rx rx/update-root!
               assoc
-              ;; ::db-pre preserves db state from beginning of each transaction step.
-              ::db-pre   nil
-              ;; ::db-start preserves db state from beginning of transaction
-              ::db-start nil
-              ;; ::ctx allows for reactions to pull data from the context itself
+              ::ctx (::event-context ctx))
+      (resume-transaction)))
+
+(defn initial-transact-async [ctx db on-success on-fail]
+  (-> ctx
+      (initialize-db db)
+      clear-transaction-data
+      append-events-to-queue
+      (update ::rx rx/update-root!
+              assoc
               ::ctx (::event-context ctx))
       (resume-transaction-async on-success on-fail)))
 
@@ -695,7 +702,6 @@
         resolver-id [::resolver (:id constraint)]
         pred-reaction (cond->
                           {:id [::constraint (:id constraint)]
-                           ::is-constraint? true
                            ::has-resolver? (boolean resolver)
                            :args-format :map
                            :args (:query constraint)
@@ -734,54 +740,52 @@
       (into (:reactions schema))
       (into (mapcat constraint->reactions (:constraints schema)))))
 
-(defn get-constraint-ids [state]
-  (keep (fn [[k v]]
-          (when (::is-constraint? v)
-            k))
-        state))
+(defn get-constraint-ids [rx-map]
+  (filter #(and (vector? %) (not (empty? %)) (= (% 0) ::constraint))
+          (keys (.reactions rx-map))))
 
-(defn add-conflicts-rx! [state]
-  (rx/add-reaction! state {:id ::conflicts
-                           :args-format :rx-map
-                           :args (vec (get-constraint-ids state))
-                           :fn (fn [preds]
-                                 ;; NOTE: Should this be made a lazy seq?
-                                 (let [conflicts
-                                       (reduce-kv
-                                        (fn [m pred-id result]
-                                          (cond
-                                            ;;TODO: add other categories like not applicable or whatever comes up
-                                            (or (true? result) (nil? result))
-                                            (update m ::passed (fnil conj #{}) pred-id)
+(defn add-conflicts-rx! [rx-map]
+  (rx/add-reaction! rx-map {:id ::conflicts
+                            :args-format :rx-map
+                            :args (vec (get-constraint-ids rx-map))
+                            :fn (fn [preds]
+                                  ;; NOTE: Should this be made a lazy seq?
+                                  (let [conflicts
+                                        (reduce-kv
+                                         (fn [m pred-id result]
+                                           (cond
+                                             ;;TODO: add other categories like not applicable or whatever comes up
+                                             (or (true? result) (nil? result))
+                                             (update m ::passed (fnil conj #{}) pred-id)
 
-                                            (false? result)
-                                            (update m ::unresolvable
-                                                    (fnil assoc {})
-                                                    pred-id
-                                                    {:id pred-id
-                                                     :message (str "Constraint predicate " pred-id " failed!")})
+                                             (false? result)
+                                             (update m ::unresolvable
+                                                     (fnil assoc {})
+                                                     pred-id
+                                                     {:id pred-id
+                                                      :message (str "Constraint predicate " pred-id " failed!")})
 
-                                            (and (vector? result) (= (first result) ::resolver))
-                                            (update m ::resolvers
-                                                    (fnil assoc {})
-                                                    pred-id
-                                                    result)
+                                             (and (vector? result) (= (first result) ::resolver))
+                                             (update m ::resolvers
+                                                     (fnil assoc {})
+                                                     pred-id
+                                                     result)
 
-                                            :else
-                                            (update m ::unresolvable
-                                                    (fnil assoc {})
-                                                    pred-id
-                                                    (if (and (map? result)
-                                                             (contains? result :message)
-                                                             (contains? result :id))
-                                                      result
-                                                      {:id pred-id
-                                                       :message (str "Constraint predicate " pred-id " failed!")
-                                                       :result result}))))
-                                        {}
-                                        preds)]
-                                   (when (not-empty (dissoc conflicts ::passed))
-                                     conflicts)))}))
+                                             :else
+                                             (update m ::unresolvable
+                                                     (fnil assoc {})
+                                                     pred-id
+                                                     (if (and (map? result)
+                                                              (contains? result :message)
+                                                              (contains? result :id))
+                                                       result
+                                                       {:id pred-id
+                                                        :message (str "Constraint predicate " pred-id " failed!")
+                                                        :result result}))))
+                                         {}
+                                         preds)]
+                                    (when (not-empty (dissoc conflicts ::passed))
+                                      conflicts)))}))
 
 (defn add-event-to-state! [state {:keys [id inputs outputs ctx-args handler async? ignore-changes should-run] :as event}]
   ;; TODO: support events that traverse context boundary
@@ -949,7 +953,7 @@
              (filter some? fx)))})))
 
 
-(declare initialize)
+(declare initialize-impl)
 
 (defn schema-is-async? [schema]
   (boolean (some :async? (:events schema))))
@@ -962,7 +966,7 @@
     ctx
     (let [[id {::keys [path] :keys [collection? parents schema index-id] :as m}] field
           ;; TODO: rewrite to use subcontext
-          {::keys [db subcontexts] :as ctx}
+          {::keys [subcontexts] :as ctx}
           (cond-> ctx
                 path (update ::reactions (fnil into []) [{:id id
                                                           :args ::db
@@ -984,17 +988,14 @@
                                                           :args [id [::start id]]
                                                           :args-format :vector
                                                           :fn #(not= %1 %2)}])
-                (and schema collection?) (update ::db (fn [db]
-                                                        (update-in db path (fn [els]
-                                                                             (if (map? els)
-                                                                               els
-                                                                               (into {}
-                                                                                     (map
-                                                                                      (juxt
-                                                                                       #(get-in %
-                                                                                                (get-in subcontexts [id ::id->path index-id]))
-                                                                                       identity))
-                                                                                     els)))))))]
+                ;; TODO: Consider integrating `RxMap` impls across contexts?
+                )]
+      ;; TODO: Move Canonicalization of collection subcontexts to specialized transact option.
+      ;; TODO: If it's a collection, we need a subcontext map under `[::subcontexts <id>]` with a create-element fn.
+      ;; TODO: If it's a singleton subcontext, we need a subcontext map under `[::subcontexts <id>]` with some sort of `initialize` fn.
+      ;; NOTE: Both of these need a helper for updating the parent db/ctx with canonical info, or change handling needs to maintain consistency.
+      (recur ctx (rest fields))
+#_
       (cond
         (and schema collection?)
         (letfn [(create-element
@@ -1046,7 +1047,7 @@
                       (::db el))
               (recur (rest fields))))
         :else
-        (recur ctx (rest fields))))))
+        ))))
 
 (defn deep-relationships [rel-map]
   (letfn [(add-relationship [m src ds]
@@ -1072,8 +1073,6 @@
       (update :effects (partial mapv add-default-id))
       (update :constraints (partial mapv add-default-id))))
 
-
-(declare pre-initialize)
 
 (defn- add-db-fn [ctx path f]
   (update ctx ::db-initializers (fnil conj []) #(update-in % path f)))
@@ -1161,20 +1160,11 @@
      (pre-initialize-rels schema)
      )))
 
-(defn apply-db-initializers [db inits]
-  (reduce
-   (fn [db init]
-     (init db))
-   db
-   inits))
+
 
 (defn- initialize-impl
-  [schema]
-  (let [{::keys [fields schema] :as initial-ctx}
-        (pre-initialize schema)
-        ;; NOTE: db-initializers are in field order, which is top-down.
-        ;;       If desired or neccessary, consider reversing order to allow children to propagate to parents?
-        ctx (-> initial-ctx
+  [{::keys [fields schema] :as initial-ctx}]
+  (let [ctx (-> initial-ctx
                 (assoc ::rx (rx/create-reactive-map {}))
                 ;; TODO: Update add-fields-to-ctx
                 ;;       so that it doesn't call initialize, but just calls initialize-impl instead.
@@ -1182,46 +1172,49 @@
                 (add-fields-to-ctx fields))]
 
 
-                         (-> ctx
-                             (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
-                             (update ::rx rx/add-reactions! (into (::reactions ctx [])
-                                                                  (parse-reactions schema)))
-                             (update ::rx add-conflicts-rx!)
-                             (update ::rx add-event-rxns! (:events schema []))
-                             (update ::rx add-effect-rxns! (:effects schema []))
-                             (update ::rx rx/finalize-reactive-map))))
+    (-> ctx
+        (assoc ::events (apply sorted-map (mapcat (juxt :id identity) (:events schema []))))
+        (update ::rx rx/add-reactions! (into (::reactions ctx [])
+                                             (parse-reactions schema)))
+        (update ::rx add-conflicts-rx!)
+        (update ::rx add-event-rxns! (:events schema []))
+        (update ::rx add-effect-rxns! (:effects schema [])))))
+
+(defn post-initialize
+  [ctx initial-db]
+  (if (::async? ctx)
+    (throw (ex-info "Context is async! please use async version of called fn"
+                    {:ctx (select-keys ctx [::schema ::async?])}))
+    (-> ctx
+        (initial-transact initial-db))))
+
+(defn post-initialize-async
+  [ctx initial-db on-success on-fail]
+  (-> ctx
+      (initial-transact-async on-success on-fail)))
 
 (defn initialize
   ([schema]
    (initialize schema {}))
   ([schema initial-db]
-   (let [ctx (initialize-impl schema)
-         db (apply-db-initializers initial-db (::db-initializers ctx))]
-     (when (::async? ctx)
-       (throw (ex-info "Schema is async, but no callback was provided!"
-                       {:schema schema
-                        :async? (::async? ctx)})))
-     (-> ctx
-         (assoc ::db db)
-         (update ::rx rx/reset-root! {::db db})
-         ;; TODO: Initial-transact on subcontexts if required
-         (initial-transact)))))
+   (-> schema
+       pre-initialize
+       initialize-impl
+       (post-initialize initial-db))))
 
 (defn initialize-async
   ([schema initial-db on-success on-fail]
-   (let [ctx (initialize-impl schema)
-         db (apply-db-initializers initial-db (::db-initializers ctx))]
-     (-> ctx
-         (assoc ::db db)
-         (update ::rx rx/reset-root! {::db db})
-         (initial-transact-async on-success on-fail)))))
+   (-> schema
+       pre-initialize
+       initialize-impl
+       (post-initialize-async initial-db on-success on-fail))))
 
 (defn trigger-effects
   ([ctx triggers]
    (if (::async? ctx)
      (throw (ex-info "Schema is async, but no callback was provided!"
                      {:schema (::schema ctx)
-                      :async? (::async ctx)}))
+                      :async? (::async? ctx)}))
      (trigger-effects ctx triggers nil)))
   ([ctx triggers cb]
    (transact ctx (reduce
