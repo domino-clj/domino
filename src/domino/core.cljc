@@ -12,6 +12,35 @@
 (defn create-new-context-in-collection [ctx idx cb]
   ((:domino.core/create-element ctx) idx cb))
 
+(declare initialize)
+
+(defn create-element
+  ([subcontext index]
+   (create-element subcontext index {}))
+  ([subcontext index db]
+   ;; TODO: Improve this initialization to reuse `pre-initialize` keys
+   (let [el (initialize (::schema subcontext) db)]
+     (update el
+             ::db
+             assoc-in
+             ((::id->path el) (::index-id subcontext) [::index])
+             index))))
+
+
+(declare initialize-async)
+
+(defn create-element-async
+  [subcontext index db on-success on-fail]
+  (initialize-async (::schema subcontext) db
+                    (fn [el]
+                      (-> el
+                          (update ::db
+                                  assoc-in
+                                  ((::id->path el) (::index-id subcontext) [::index])
+                                  index)
+                          (on-success)))
+                    on-fail))
+
 ;; ------------------------------------------------------------------------------
 ;; Change Parsing
 
@@ -191,7 +220,7 @@
 ;; ------------------------------------------------------------------------------
 ;; Change Handling
 
-(declare pre-initialize initialize-impl post-initialize post-initialize-async initial-transact transact)
+(declare pre-initialize initialize-impl post-initialize post-initialize-async initial-transact initial-transact-async transact transact-async)
 
 (defn prevent-change-to-final! [ctx change]
   (let [id (if (#{::set-value ::remove-value} (first change))
@@ -206,6 +235,90 @@
                    :opts (helper/trimmed-opts ctx id)
                    :change change})))
       change)))
+
+(defn- update-child-impl [ctx [id idx?] child-changes]
+  (let [sub-context ((::subcontexts ctx) id)
+        collection? (helper/is-collection? sub-context)
+        child-ctx? (if collection?
+                     (get-in sub-context [::elements idx?])
+                     sub-context)
+        subctx-id (if collection? [id idx?] [id])
+        child-element-path (if collection?
+                             [::subcontexts id ::elements idx?]
+                             [::subcontexts id])
+        child-db-path (cond-> (helper/compute-path ctx id)
+                        collection? (conj idx?))
+        child-ctx-pre  (-> child-ctx?
+                           (or (create-element idx?))
+                           (update ::event-context merge (::event-context ctx))
+                           (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id)))
+        child-ctx (cond-> child-ctx-pre
+                    ;; NOTE: possible async here.
+                    (nil?  child-ctx?) (->
+                                        (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
+                                        initial-transact)
+                    (some? child-ctx?) (transact child-changes))
+        child-db (::db child-ctx)
+        child-tx-report (::transaction-report child-ctx)]
+    ;; NOTE: in error handling, consider child contexts.
+    (-> ctx
+        (assoc-in child-element-path child-ctx)
+        (update ::db (fn [db]
+                       (if (empty? child-db)
+                         (dissoc-in db child-db-path)
+                         (assoc-in  db child-db-path child-db))))
+        (update-in [::transaction-report :changes]
+                   (fnil conj []) {:change (into [::update-child subctx-id] child-changes)
+                                   :id     subctx-id
+                                   :status :complete
+                                   :report child-tx-report}))))
+
+(defn- update-child-impl-async [ctx [id idx?] child-changes on-success on-fail]
+  (let [sub-context ((::subcontexts ctx) id)
+        collection? (helper/is-collection? sub-context)
+        child-ctx? (if collection?
+                     (get-in sub-context [::elements idx?])
+                     sub-context)
+        subctx-id (if collection? [id idx?] [id])
+        child-element-path (if collection?
+                             [::subcontexts id ::elements idx?]
+                             [::subcontexts id])
+        child-db-path (cond-> (helper/compute-path ctx id)
+                        collection? (conj idx?))
+        wrapped-success (fn [child-ctx]
+                          (let [child-db        (::db child-ctx)
+                                child-tx-report (::transaction-report child-ctx)]
+                            (-> ctx
+                                (assoc-in child-element-path child-ctx)
+                                (update ::db (fn [db]
+                                               (if (empty? child-db)
+                                                 (dissoc-in db child-db-path)
+                                                 (assoc-in  db child-db-path child-db))))
+                                (update-in [::transaction-report :changes]
+                                           (fnil conj []) {:change (into [::update-child subctx-id] child-changes)
+                                                           :id     subctx-id
+                                                           :status :complete
+                                                           :report child-tx-report})
+                                (on-success))))
+        wrapped-fail (fn [child-error] (on-fail
+                                        (ex-info "Failed to update child."
+                                                 {:subcontext id
+                                                  :element-id idx?}
+                                                 child-error)))]
+    (if (nil? child-ctx?)
+      (create-element-async sub-context idx? {}
+                            (fn [child-ctx-pre]
+                              (-> child-ctx-pre
+                                  (update ::event-context merge (::event-context ctx))
+                                  (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id))
+                                  (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
+                                  (initial-transact-async wrapped-success wrapped-fail)))
+                            wrapped-fail)
+
+      (-> child-ctx?
+          (update ::event-context merge (::event-context ctx))
+          (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id))
+          (transact-async child-changes wrapped-success wrapped-fail)))))
 
 (defn- resolve-change-impl
     [ctx change]
@@ -239,43 +352,8 @@
                   {:id id}))))
 
     ::update-child
-
-    (let [[_ [id idx?] & child-changes] change
-          sub-context ((::subcontexts ctx) id)
-          collection? (helper/is-collection? sub-context)
-          child-ctx? (if collection?
-                       (get-in sub-context [::elements idx?])
-                       sub-context)
-          subctx-id (if collection? [id idx?] [id])
-          child-element-path (if collection?
-                               [::subcontexts id ::elements idx?]
-                               [::subcontexts id])
-          child-db-path (cond-> (helper/compute-path ctx id)
-                          collection? (conj idx?))
-          child-ctx-pre  (-> child-ctx?
-                             (or ((::create-element sub-context) idx?))
-                             (update ::event-context merge (::event-context ctx))
-                             (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id)))
-          child-ctx (cond-> child-ctx-pre
-                        ;; NOTE: possible async here.
-                      (nil?  child-ctx?) (->
-                                          (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
-                                          initial-transact)
-                        (some? child-ctx?) (transact child-changes))
-          child-db (::db child-ctx)
-          child-tx-report (::transaction-report child-ctx)]
-      ;; NOTE: in error handling, consider child contexts.
-      (-> ctx
-          (assoc-in child-element-path child-ctx)
-          (update ::db (fn [db]
-                         (if (empty? child-db)
-                           (dissoc-in db child-db-path)
-                           (assoc-in  db child-db-path child-db))))
-          (update-in [::transaction-report :changes]
-                     (fnil conj []) {:change change
-                                     :id     subctx-id
-                                     :status :complete
-                                     :report child-tx-report})))
+    (let [subctx-id (second change)]
+      (update-child-impl ctx subctx-id (drop 2 change)))
 
     ::remove-child
     (let [[_ [id idx]] change]
@@ -477,14 +555,23 @@
                                                         event-history)
                          :true (assoc :status :complete)))))))))
 
-(defn change-is-async? [ctx change]
-  (and (= ::update-child (first change))
-       (-> ctx ::subcontexts (first (second change)) ::async?)))
 
 (declare transact-async initialize-async)
 
-(defn update-child-async [ctx on-success on-fail]
-  (on-fail (ex-info "NOT IMPLEMENTED" {:changes (::changes ctx)})))
+(defn change-is-async? [ctx change]
+  (or
+   ;; Updating an async child context
+   (and (= ::update-child (first change))
+        (-> ctx ::subcontexts (first (second change)) ::async?))))
+
+(defn resolve-change-async [ctx change on-success on-fail]
+  (cond
+    (and (= ::update-child (first change))
+         (-> ctx ::subcontexts (first (second change)) ::async?))
+    (update-child-impl-async ctx (second change) (drop 2 change) on-success on-fail)
+
+    :else
+    (on-success (resolve-change ctx change))))
 
 (defn resume-transaction-async
   [{db-pre ::db
@@ -498,8 +585,10 @@
   (if (not-empty changes)
     ;; 1. resolve changes
     (if (change-is-async? ctx-pre (first changes))
-      (update-child-async (assoc ::pending-changes (rest changes))
-                          #(resume-transaction-async % on-success on-fail) on-fail)
+      (resolve-change-async
+       (assoc ctx-pre ::pending-changes (rest changes))
+       (first changes)
+       #(resume-transaction-async % on-success on-fail) on-fail)
       (-> ctx-pre
           (assoc ::pending-changes (rest changes))
           (resolve-change (first changes))
@@ -575,6 +664,11 @@
         (update ::rx rx/reset-root! {::db       db
                                      ::db-pre   nil
                                      ::db-start nil}))))
+
+(defn initialize-subcontext [ctx subctx-id]
+  ;; TODO: Use create-element(-async) to add all the initial-db subcontexts and run events etc.
+  ;; NOTE: Reference old add-elements-to-ctx letfn binding
+  )
 
 (defn initial-transact [ctx db]
   (-> ctx
@@ -987,10 +1081,7 @@
                                                          {:id [::changed-ever? id]
                                                           :args [id [::start id]]
                                                           :args-format :vector
-                                                          :fn #(not= %1 %2)}])
-                ;; TODO: Consider integrating `RxMap` impls across contexts?
-                )]
-      ;; TODO: Move Canonicalization of collection subcontexts to specialized transact option.
+                                                          :fn #(not= %1 %2)}]))]
       ;; TODO: If it's a collection, we need a subcontext map under `[::subcontexts <id>]` with a create-element fn.
       ;; TODO: If it's a singleton subcontext, we need a subcontext map under `[::subcontexts <id>]` with some sort of `initialize` fn.
       ;; NOTE: Both of these need a helper for updating the parent db/ctx with canonical info, or change handling needs to maintain consistency.
@@ -1077,29 +1168,41 @@
 (defn- add-db-fn [ctx path f]
   (update ctx ::db-initializers (fnil conj []) #(update-in % path f)))
 
+(defn- coll-subctx-db-initializer [index-id-path]
+  (fn [els]
+    (if (map? els)
+      els
+      (into {}
+            (map
+             (juxt
+              #(get-in %
+                       index-id-path)
+              identity))
+            els))))
+
 (defn pre-initialize-fields
   [ctx fields]
   (reduce
    (fn [ctx [id {::keys [path] :keys [collection? parents schema index-id initialize initial-value default-value final?] :as m}]]
-     (cond-> ctx
-       (not-empty m) (update ::id->opts (fnil assoc {}) id m)
-       path (->
-             (update ::id->parents (fnil assoc {}) id (or parents #{}))
-             (update ::id->path (fnil assoc {}) id path)
-             (cond->
-                 default-value (add-db-fn path #(if (some? %) % default-value))
-                 initial-value (add-db-fn path (fn [_] initial-value))
-                 initialize    (add-db-fn path initialize))
-             ;; Intentionally skipping `::reactions` (see line 876)
-             )
-       (and schema (schema-is-async? schema)) (assoc ::async? true)
-       schema (update ::subcontexts (fnil assoc {}) id
-                      (if collection?
-                        (assoc
-                         (pre-initialize schema)
-                         ::collection? true
-                         ::index-id index-id)
-                        (pre-initialize schema)))))
+     (let [subctx (when schema (pre-initialize schema))]
+       (cond-> ctx
+         (not-empty m) (update ::id->opts (fnil assoc {}) id m)
+         path (->
+               (update ::id->parents (fnil assoc {}) id (or parents #{}))
+               (update ::id->path (fnil assoc {}) id path)
+               (cond->
+                   default-value            (add-db-fn path #(if (some? %) % default-value))
+                   initial-value            (add-db-fn path (fn [_] initial-value))
+                   initialize               (add-db-fn path initialize)
+                   (and schema collection?) (add-db-fn ctx path (coll-subctx-db-initializer (get-in subctx [::id->path index-id]))))
+               ;; Intentionally skipping `::reactions` (see line 876)
+               )
+         (and schema (schema-is-async? schema)) (assoc ::async? true)
+         schema (update ::subcontexts (fnil assoc {}) id
+                        (cond-> subctx
+                          true        (assoc ::absolute-path (into (::absolute-path ctx []) path))
+                          collection? (assoc ::collection? true
+                                             ::index-id index-id))))))
    ctx
    fields))
 

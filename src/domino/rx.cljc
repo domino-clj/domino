@@ -57,7 +57,7 @@
     new-v))
 
 
-(deftype RxReaction [inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args ^:volatile-mutable stale?]
+(deftype RxReaction [id inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args ^:volatile-mutable stale?]
   IDominoReaction
   (-add-watch [this key f]
     (set! watches
@@ -101,7 +101,6 @@
     "Finds the registered reaction. Should throw if unregistered.")
   (-add-reaction! [this rx-config])
   (-remove-reaction! [this rx-id cascade?])
-
   (-reset-root! [this v])
 
   (-swap-root! [this f]
@@ -122,8 +121,12 @@
       (throw (ex-info "Reaction is not registered!"
                       {:reaction-id id}))))
   (-add-reaction! [this {rx-fn :fn :keys [id inputs] :as rx-config}]
+    (when (contains? reactions id)
+      (throw (ex-info "Reaction already exists!"
+                      {:id id})))
     (let [watch-rxns (select-keys reactions inputs)
           rxn (->RxReaction
+               id
                watch-rxns
                rx-fn
                {}
