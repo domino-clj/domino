@@ -1,5 +1,10 @@
 ### 0.4.0 WIP
 
+#### 0.4.0-alpha.1
+
+- Separate Async and Sync transact and initialize functions
+- Type-based implementation of domino.rx.IDominoRxMap
+
 - Massive Overhaul. Express all business logic in terms of constraints.
 - TODO Update changelog, tests, and docs
 

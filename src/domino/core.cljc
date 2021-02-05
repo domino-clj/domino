@@ -3,11 +3,7 @@
    [domino.util :as util :refer [dissoc-in]]
    [domino.context.helpers :as helper]
    [clojure.set :refer [union]]
-   [domino.rx :as rx]
-   #_[#?(:clj  com.wsscode.async.async-clj
-       :cljs com.wsscode.async.async-cljs)
-    :as wa
-    :refer [go-promise <?]]))
+   [domino.rx :as rx]))
 
 (defn create-new-context-in-collection [ctx idx cb]
   ((:domino.core/create-element ctx) idx cb))
