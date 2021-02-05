@@ -622,7 +622,15 @@
           ;; NOTE: this is where async may be needed. Currently, event returns a fn.
           ;; TODO: async!
           (if (fn? c)
-            (on-fail (ex-info "NOT IMPLEMENTED" {:event-id event-id}))
+            (c (fn [result]
+                 (cond-> ctx
+                   (some? result)  (->
+                                    (update ::event-history   (fnil conj []) (peek event-queue))
+                                    (assoc  ::pending-changes (parse-changes ctx [result])))
+                   true            (->
+                                    (update ::event-queue pop)
+                                    (resume-transaction-async on-success on-fail))))
+               on-fail)
             (cond-> ctx
               (some? c)  (->
                           (update ::event-history   (fnil conj []) (peek event-queue))
@@ -650,6 +658,89 @@
                          :true (assoc :status :complete)))
               (on-success)))))))
 
+(defn- assoc-in-non-empty [m p v]
+  (if (empty? v)
+    (dissoc-in m p)
+    (assoc-in m p v)))
+
+(defn initialize-subcontext [ctx subctx-id subcontext]
+  ;; TODO: Use create-element(-async) to add all the initial-db subcontexts and run events etc.
+  ;; NOTE: Reference old add-elements-to-ctx letfn binding
+  ;; NOTE: Will include a call to initialize, so it will traverse deeply. Only have to solve local node.
+  (let [path (get (::id->path ctx) subctx-id)]
+    (if (::collection? subcontext)
+      (reduce-kv
+       (fn [ctx k v]
+         (let [el (create-element subcontext k v)]
+           (-> ctx
+               (assoc-in [::subcontexts subctx-id ::elements k] el)
+               (update ::db
+                       assoc-in-non-empty
+                       (conj path k)
+                       (::db el)))))
+       ctx
+       (get-in (::db ctx) path))
+
+      (let [el (initialize (::schema subcontext) (get-in (::db ctx) path))]
+        (->
+         ctx
+         (assoc-in [::subcontexts subctx-id] el)
+         (update ::db assoc-in-non-empty
+                 path
+                 (::db el)))))))
+
+
+
+(defn- initialize-coll-subcontext-async-impl [ctx subctx-id subcontext on-success on-fail]
+  (let [path       (get (::id->path ctx) subctx-id)
+        elements   (get-in (::db ctx) path)
+        init!
+        (reduce-kv
+         (fn [wrapped-success k v]
+           (fn [ctx-inner]
+             (create-element-async subcontext k v
+                                   (fn [el]
+                                     (-> ctx-inner
+                                         (assoc-in [::subcontexts subctx-id ::elements k] el)
+                                         (update ::db
+                                                 assoc-in-non-empty
+                                                 (conj path k)
+                                                 (::db el))
+                                         (wrapped-success)))
+                                   (fn [error]
+                                     (on-fail (ex-info "Failed to initialize subcontext element"
+                                                       {:subcontext-id subctx-id
+                                                        :element-index k}
+                                                       error))))))
+         on-success
+         elements)]
+    (init! ctx)))
+
+
+(defn initialize-subcontext-async [ctx subctx-id subcontext on-success on-fail]
+  (let [path (get (::id->path ctx) subctx-id)]
+    (cond (not (::async? subcontext))
+          (on-success (initialize-subcontext ctx subctx-id))
+
+          (::collection? subcontext)
+          (initialize-coll-subcontext-async-impl ctx subctx-id on-success on-fail)
+
+          :else
+          (initialize-async (::schema subcontext) (get-in (::db ctx) path)
+                            (fn [el]
+                              (->
+                               ctx
+                               (assoc-in [::subcontexts subctx-id] el)
+                               (update ::db assoc-in-non-empty
+                                       path
+                                       (::db el))
+                               on-success))
+                            (fn [error]
+                              (on-fail
+                               (ex-info "Failed to initialize async subcontext"
+                                        {:subctx-id subctx-id}
+                                        error)))))))
+
 (defn apply-db-initializers [db inits]
   (reduce
    (fn [db init]
@@ -660,19 +751,35 @@
 (defn initialize-db [ctx initial-db]
   (let [db (apply-db-initializers initial-db (::db-initializers ctx))]
     (-> ctx
-        (assoc ::db db)
-        (update ::rx rx/reset-root! {::db       db
-                                     ::db-pre   nil
-                                     ::db-start nil}))))
+        (assoc ::db db))))
 
-(defn initialize-subcontext [ctx subctx-id]
-  ;; TODO: Use create-element(-async) to add all the initial-db subcontexts and run events etc.
-  ;; NOTE: Reference old add-elements-to-ctx letfn binding
-  )
+(defn set-initial-rx-root [ctx]
+  (update ctx ::rx rx/reset-root! {::db       (::db ctx)
+                                   ::db-pre   nil
+                                   ::db-start nil}))
+
+(defn initialize-all-subcontexts [ctx]
+  (reduce-kv
+   (fn [ctx-inner id subctx]
+     (initialize-subcontext ctx-inner id subctx))
+   ctx
+   (::subcontexts ctx)))
+
+(defn initialize-all-subcontexts-async [ctx on-success on-fail]
+  (let [init!
+        (reduce-kv
+         (fn [wrapped-success id subctx]
+           (fn [ctx-inner]
+             (initialize-subcontext-async ctx-inner id subctx wrapped-success on-fail)))
+         on-success
+         (::subcontexts ctx))]
+    (init! ctx)))
 
 (defn initial-transact [ctx db]
   (-> ctx
       (initialize-db db)
+      (initialize-all-subcontexts)
+      (set-initial-rx-root)
       clear-transaction-data
       append-events-to-queue
       (update ::rx rx/update-root!
@@ -683,12 +790,16 @@
 (defn initial-transact-async [ctx db on-success on-fail]
   (-> ctx
       (initialize-db db)
-      clear-transaction-data
-      append-events-to-queue
-      (update ::rx rx/update-root!
-              assoc
-              ::ctx (::event-context ctx))
-      (resume-transaction-async on-success on-fail)))
+      (initialize-all-subcontexts-async
+       #(-> %
+         (set-initial-rx-root)
+         clear-transaction-data
+         append-events-to-queue
+         (update ::rx rx/update-root!
+                 assoc
+                 ::ctx (::event-context ctx))
+         (resume-transaction-async on-success on-fail))
+       on-fail)))
 
 (defn transact
   ([{db-pre ::db event-context ::event-context :as ctx-pre} user-changes]
@@ -954,11 +1065,16 @@
                              (let [a (process-args a)]
                                (when (or (not (ifn? should-run)) (should-run a))
                                  (if async?
-                                   (fn [cb]
+                                   (fn [on-success on-fail]
                                      (handler
                                       a
                                       (fn [result]
-                                        (cb (process-result result outputs)))))
+                                        (on-success (process-result result outputs)))
+                                      (fn [error]
+                                        (on-fail (ex-info "Error occurred in event."
+                                                          {:event-id id
+                                                           :args     a}
+                                                          error)))))
                                    (process-result (handler a) outputs))))))})))
 
 (defn add-event-rxns! [state events]
@@ -1082,63 +1198,7 @@
                                                           :args [id [::start id]]
                                                           :args-format :vector
                                                           :fn #(not= %1 %2)}]))]
-      ;; TODO: If it's a collection, we need a subcontext map under `[::subcontexts <id>]` with a create-element fn.
-      ;; TODO: If it's a singleton subcontext, we need a subcontext map under `[::subcontexts <id>]` with some sort of `initialize` fn.
-      ;; NOTE: Both of these need a helper for updating the parent db/ctx with canonical info, or change handling needs to maintain consistency.
-      (recur ctx (rest fields))
-#_
-      (cond
-        (and schema collection?)
-        (letfn [(create-element
-                  ([idx]
-                   (create-element idx {}))
-                  ([idx v]
-                   (let [el (initialize schema v)]
-
-                     (update el
-                             ::db
-                             assoc-in
-                             ((::id->path el) index-id [::index])
-                             idx))))
-                (add-element-to-ctx [ctx idx v]
-                  (let [el (create-element idx v)]
-                    (-> ctx
-                        (assoc-in [::subcontexts id ::elements idx] el)
-                        (update ::db
-                                (fn [m p v]
-                                  (if (empty? v)
-                                    (dissoc-in m p)
-                                    (assoc-in m p v)))
-                                (conj path idx)
-                                (::db el)))))
-                (add-elements-to-ctx [ctx kvs]
-                  (reduce
-                   (fn [acc [k v]]
-                     (add-element-to-ctx acc k v))
-                   ctx
-                   kvs))]
-          (-> ctx
-              (update ::subcontexts update id assoc
-                      ::create-element create-element)
-
-              (add-elements-to-ctx
-               (vec (get-in db path)))
-              (recur (rest fields))))
-
-        schema
-        (let [el (initialize schema (get-in db path))]
-          (-> ctx
-              (update ::subcontexts (fnil assoc {}) id el)
-              (update ::db
-                      (fn [m p v]
-                        (if (empty? v)
-                          (dissoc-in m p)
-                          (assoc-in m p v)))
-                      path
-                      (::db el))
-              (recur (rest fields))))
-        :else
-        ))))
+      (recur ctx (rest fields)))))
 
 (defn deep-relationships [rel-map]
   (letfn [(add-relationship [m src ds]
@@ -1194,7 +1254,9 @@
                    default-value            (add-db-fn path #(if (some? %) % default-value))
                    initial-value            (add-db-fn path (fn [_] initial-value))
                    initialize               (add-db-fn path initialize)
-                   (and schema collection?) (add-db-fn ctx path (coll-subctx-db-initializer (get-in subctx [::id->path index-id]))))
+                   (and schema collection?) (add-db-fn path
+                                                       (coll-subctx-db-initializer
+                                                        (get-in subctx [::id->path index-id]))))
                ;; Intentionally skipping `::reactions` (see line 876)
                )
          (and schema (schema-is-async? schema)) (assoc ::async? true)
@@ -1294,7 +1356,7 @@
 (defn post-initialize-async
   [ctx initial-db on-success on-fail]
   (-> ctx
-      (initial-transact-async on-success on-fail)))
+      (initial-transact-async initial-db on-success on-fail)))
 
 (defn initialize
   ([schema]
@@ -1313,24 +1375,37 @@
        (post-initialize-async initial-db on-success on-fail))))
 
 (defn trigger-effects
-  ([ctx triggers]
-   (if (::async? ctx)
-     (throw (ex-info "Schema is async, but no callback was provided!"
-                     {:schema (::schema ctx)
-                      :async? (::async? ctx)}))
-     (trigger-effects ctx triggers nil)))
-  ([ctx triggers cb]
-   (transact ctx (reduce
-                  (fn [changes fx]
-                    (let [[id args] (if (coll? fx) fx [fx nil])]
-                      (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
-                        (conj
-                         changes
-                         (fx-fn args))
-                        changes)))
-                  []
-                  triggers)
-             (or cb identity))))
+  [ctx triggers]
+  (if (::async? ctx)
+    (throw (ex-info "Schema is async, but no callback was provided!"
+                    {:schema (::schema ctx)
+                     :async? (::async? ctx)}))
+    (transact ctx (reduce
+                   (fn [changes fx]
+                     (let [[id args] (if (coll? fx) fx [fx nil])]
+                       (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
+                         (conj
+                          changes
+                          (fx-fn args))
+                         changes)))
+                   []
+                   triggers))))
+
+(defn trigger-effects-async
+  [ctx triggers on-success on-fail]
+  (if-not (::async? ctx)
+    (on-success (trigger-effects ctx triggers))
+    (transact-async ctx (reduce
+                         (fn [changes fx]
+                           (let [[id args] (if (coll? fx) fx [fx nil])]
+                             (if-some [fx-fn (rx/get-reaction (::rx ctx) id)]
+                               (conj
+                                changes
+                                (fx-fn args))
+                               changes)))
+                         []
+                         triggers)
+                    on-success on-fail)))
 
 (defn select
   "Given an id keyword or vector, select a value from a domino context."
