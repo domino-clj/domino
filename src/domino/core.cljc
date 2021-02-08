@@ -244,16 +244,11 @@
                              [::subcontexts id])
         child-db-path (cond-> (helper/compute-path ctx id)
                         collection? (conj idx?))
-        child-ctx-pre  (-> child-ctx?
-                           (or (create-element sub-context idx?))
-                           (update ::event-context merge (::event-context ctx))
-                           (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id)))
-        child-ctx (cond-> child-ctx-pre
-                    ;; NOTE: possible async here.
-                    (nil?  child-ctx?) (->
-                                        (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
-                                        initial-transact)
-                    (some? child-ctx?) (transact child-changes))
+        child-ctx  (-> child-ctx?
+                       (or (create-element sub-context idx?))
+                       (update ::event-context merge (::event-context ctx))
+                       (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id))
+                       (transact child-changes))
         child-db (::db child-ctx)
         child-tx-report (::transaction-report child-ctx)]
     ;; NOTE: in error handling, consider child contexts.
@@ -296,7 +291,8 @@
                                                            :status :complete
                                                            :report child-tx-report})
                                 (on-success))))
-        wrapped-fail (fn [child-error] (on-fail
+        wrapped-fail (fn [child-error]
+                       (on-fail
                                         (ex-info "Failed to update child."
                                                  {:subcontext id
                                                   :element-id idx?}
@@ -307,8 +303,7 @@
                               (-> child-ctx-pre
                                   (update ::event-context merge (::event-context ctx))
                                   (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id))
-                                  (assoc ::pending-changes (parse-changes child-ctx-pre child-changes))
-                                  (initial-transact-async wrapped-success wrapped-fail)))
+                                  (transact-async child-changes wrapped-success wrapped-fail)))
                             wrapped-fail)
 
       (-> child-ctx?
@@ -317,7 +312,7 @@
           (transact-async child-changes wrapped-success wrapped-fail)))))
 
 (defn- resolve-change-impl
-    [ctx change]
+  [ctx change]
   (case (first change)
     ::set-value
     (let [[_ id v] change]
@@ -368,11 +363,12 @@
   [ctx-pre change]
   (if (valid-change? change)
     (resolve-change-impl ctx-pre change)
-   (throw
-    (ex-info "Invalid change!"
-             {:id ::invalid-change
-              :message "Invalid change!"
-              :change change}))))
+    (do
+      (throw
+       (ex-info "Invalid change!"
+                {:id ::invalid-change
+                 :message "Invalid change!"
+                 :change change})))))
 
 
 ;; ------------------------------------------------------------------------------
@@ -577,7 +573,6 @@
    on-success
    on-fail]
   ;; DO THE TRANSACTION
-
   (if (not-empty changes)
     ;; 1. resolve changes
     (if (change-is-async? ctx-pre (first changes))
