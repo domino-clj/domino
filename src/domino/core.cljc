@@ -936,9 +936,9 @@
       (into (:reactions schema))
       (into (mapcat constraint->reactions (:constraints schema)))))
 
-(defn get-constraint-ids [rx-map]
+(defn get-constraint-ids [^domino.rx.RxMap rx-map]
   (filter #(and (vector? %) (not (empty? %)) (= (% 0) ::constraint))
-          (keys (.reactions rx-map))))
+          (keys (.-reactions rx-map))))
 
 (defn add-conflicts-rx! [rx-map]
   (rx/add-reaction! rx-map {:id ::conflicts
@@ -1409,7 +1409,7 @@
     (empty? ctx)
     nil
 
-    (and (keyword? id) (contains? rx id))
+    (and (keyword? id) (contains? (.-reactions rx) id))
     (rx/get-reaction rx id)
 
     (vector? id)

@@ -1,4 +1,5 @@
 (ns domino.rx
+  (:refer-clojure :exclude [-add-watch -remove-watch -reset!])
   (:require [clojure.set :refer [union]]
             [clojure.pprint]))
 
@@ -96,7 +97,7 @@
   (-stale? [this] stale?)
   (-mark-stale! [this] (set! stale? true)))
 
-(defprotocol IDominoRxMap
+(defprotocol IRxMap
   (-get-reaction [this id]
     "Finds the registered reaction. Should throw if unregistered.")
   (-add-reaction! [this rx-config])
@@ -114,7 +115,7 @@
 
 
 (deftype RxMap [reactions]
-  IDominoRxMap
+  IRxMap
   (-get-reaction [this id]
     (if-some [rx (get reactions id)]
       rx
@@ -300,21 +301,21 @@
      :inputs inputs
      :fn     rx-fn}))
 
-(defn add-reaction! [reactive-map rx-config]
+(defn add-reaction! [^RxMap reactive-map rx-config]
   ;; TODO: process reaction by wrapping rx-fn and returning the low-level rx-config-map
   (->> rx-config
-       (parse-rx-config (.reactions reactive-map))
+       (parse-rx-config (.-reactions reactive-map))
        (-add-reaction! reactive-map)))
 
 
-(defn add-reactions! [reactive-map reactions]
-    (let [get-inputs (fn [m rxn]
+(defn add-reactions! [^RxMap reactive-map reactions]
+    (let [get-inputs (fn [^RxMap m rxn]
                        ;; NOTE: since infer-args-format is based on a complete map, we must set a default
                        (args->inputs
                         (or (:args-format rxn)
-                            (infer-args-format (.reactions m) (:args rxn) :single))
+                            (infer-args-format (.-reactions m) (:args rxn) :single))
                         (:args rxn)))]
-      (loop [m reactive-map
+      (loop [^RxMap m reactive-map
              blocked {}
              blocking {}
              [rxn :as rxns] reactions]
@@ -327,7 +328,7 @@
           (if-let [blocks (not-empty
                            (set
                             (remove
-                             (partial contains? (.reactions m))
+                             (partial contains? (.-reactions m))
                              (get-inputs m rxn))))]
             (recur m
                    (assoc blocked rxn blocks)
@@ -355,7 +356,7 @@
     (-get-value rxn)
     (throw (ex-info "No Reaction for id."
                     {:id rx-id
-                     :reactions (.reactions rx-map)}))))
+                     :reactions (.-reactions rx-map)}))))
 
 (defn compute-reaction [rx-map _]
   #_(println "This function is deprecated. get-reaction will do neccessary computations only once.")
