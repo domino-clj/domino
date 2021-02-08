@@ -245,7 +245,7 @@
         child-db-path (cond-> (helper/compute-path ctx id)
                         collection? (conj idx?))
         child-ctx-pre  (-> child-ctx?
-                           (or (create-element idx?))
+                           (or (create-element sub-context idx?))
                            (update ::event-context merge (::event-context ctx))
                            (assoc ::absolute-id  (into (::absolute-id ctx []) subctx-id)))
         child-ctx (cond-> child-ctx-pre
@@ -558,12 +558,12 @@
   (or
    ;; Updating an async child context
    (and (= ::update-child (first change))
-        (-> ctx ::subcontexts (first (second change)) ::async?))))
+        (-> ctx ::subcontexts (get (first (second change))) ::async?))))
 
 (defn resolve-change-async [ctx change on-success on-fail]
   (cond
     (and (= ::update-child (first change))
-         (-> ctx ::subcontexts (first (second change)) ::async?))
+         (-> ctx ::subcontexts (get (first (second change))) ::async?))
     (update-child-impl-async ctx (second change) (drop 2 change) on-success on-fail)
 
     :else
@@ -716,10 +716,10 @@
 (defn initialize-subcontext-async [ctx subctx-id subcontext on-success on-fail]
   (let [path (get (::id->path ctx) subctx-id)]
     (cond (not (::async? subcontext))
-          (on-success (initialize-subcontext ctx subctx-id))
+          (on-success (initialize-subcontext ctx subctx-id subcontext))
 
           (::collection? subcontext)
-          (initialize-coll-subcontext-async-impl ctx subctx-id on-success on-fail)
+          (initialize-coll-subcontext-async-impl ctx subctx-id subcontext on-success on-fail)
 
           :else
           (initialize-async (::schema subcontext) (get-in (::db ctx) path)
