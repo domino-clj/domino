@@ -1,7 +1,8 @@
 (ns domino.rx
   (:refer-clojure :exclude [-add-watch -remove-watch -reset!])
   (:require [clojure.set :refer [union]]
-            [clojure.pprint]))
+            [clojure.pprint]
+            [domino.util :refer [empty-queue]]))
 
 ;; ==============================================================================
 ;; ABOUT
@@ -18,7 +19,7 @@
 
 ;; ==============================================================================
 ;; NEW
-
+#_
 (defprotocol IDominoReaction
   (-add-watch    [this key f])
   (-remove-watch [this key])
@@ -28,9 +29,11 @@
   (-stale? [this])
   (-mark-stale! [this]))
 
+#_
 (defprotocol IRxResettable
   (-reset! [this new-v]))
 
+#_
 (deftype RxRoot [^:volatile-mutable value ^:volatile-mutable watches]
   IDominoReaction
   (-add-watch [this key f]
@@ -57,7 +60,7 @@
           (watch-fn value new-v))))
     new-v))
 
-
+#_
 (deftype RxReaction [id inputs rx-fn ^:volatile-mutable watches ^:volatile-mutable value ^:volatile-mutable previous-fn-args ^:volatile-mutable stale?]
   IDominoReaction
   (-add-watch [this key f]
@@ -97,6 +100,7 @@
   (-stale? [this] stale?)
   (-mark-stale! [this] (set! stale? true)))
 
+#_
 (defprotocol IRxMap
   (-get-reaction [this id]
     "Finds the registered reaction. Should throw if unregistered.")
@@ -113,7 +117,7 @@
     [this f a b c d e f]
     [this f a b c d e f args]))
 
-
+#_
 (deftype RxMap [reactions]
   IRxMap
   (-get-reaction [this id]
@@ -195,6 +199,143 @@
     (let [root (::root reactions)]
       (-reset-root! this (apply fun (-get-value root) a b c d e f args)))))
 
+
+(defprotocol IRxMap
+  (-reset-root! [this v])
+  (-swap-root! [this f]
+    [this f a]
+    [this f a b]
+    [this f a b c]
+    [this f a b c d]
+    [this f a b c d e]
+    [this f a b c d e f]
+    [this f a b c d e f args])
+  (-add-reaction! [this rx-config])
+  (-remove-reaction! [this rx-id cascade?])
+  (-get-value   [this id])
+  (-has-reaction? [this id]))
+
+(deftype RxMap [reactions root ^:volatile-mutable data ^:volatile-mutable rx-states]
+  IRxMap
+  (-reset-root! [this v]
+    (RxMap. reactions v data {}))
+  (-swap-root! [this fun]
+    (-reset-root! this (fun root)))
+  (-swap-root! [this fun a]
+    (-reset-root! this (fun root a)))
+  (-swap-root! [this fun a b]
+    (-reset-root! this (fun root a b)))
+  (-swap-root! [this fun a b c]
+    (-reset-root! this (fun root a b c)))
+  (-swap-root! [this fun a b c d]
+    (-reset-root! this (fun root a b c d)))
+  (-swap-root! [this fun a b c d e]
+    (-reset-root! this (fun root a b c d e)))
+  (-swap-root! [this fun a b c d e f]
+    (-reset-root! this (fun root a b c d e f)))
+  (-swap-root! [this fun a b c d e f args]
+    (-reset-root! this (apply fun root a b c d e f args)))
+  (-add-reaction! [this {rx-fn :fn
+                         inputs :inputs
+                         id     :id
+                         :as rx-config}]
+    (cond
+      (= id ::root)
+      (throw (ex-info "Cannot register reaction with ID `::root`"
+                      {:rx-config rx-config}))
+      (contains? reactions id)
+      (throw (ex-info "Reaction already exists with ID!"
+                      {:rx-config rx-config}))
+      (not (ifn? rx-fn))
+      (throw (ex-info "`:fn` attribute must satisfy IFn protocol!"
+                      {:rx-config rx-config}))
+      (some #(not (or (= ::root %) (contains? reactions %))) inputs)
+      (throw (ex-info "Every entry in `:inputs` must be a reaction that already exists!"
+                      {:rx-config rx-config
+                       :missing (remove (partial contains? reactions) inputs)}))
+      :else
+      (RxMap.
+       (reduce
+        (fn [acc in]
+          (update acc in update ::downstream (fnil conj #{}) id))
+        (assoc reactions id (assoc rx-config ::upstream (set inputs)))
+        inputs)
+       root
+       data
+       rx-states)))
+  (-remove-reaction! [this id cascade?]
+    (let [downstreams (-> reactions
+                          (get id)
+                          ::downstream)]
+      (cond
+        (empty? downstreams)
+        (RxMap. (reduce
+                 (fn [acc ds]
+                   (update acc ds
+                           update ::downstream
+                           disj id))
+                 (dissoc reactions id)
+                 (::upstream (get reactions id)))
+                root
+                (dissoc data id)
+                (dissoc rx-states id))
+
+        cascade?
+        (-remove-reaction!
+         (reduce
+          (fn [acc id-inner]
+            (-remove-reaction! acc id-inner true))
+          this
+          downstreams)
+         id true)
+
+        :else
+        (throw (ex-info "Cannot remove reaction due to downstream reactions."
+                        {:downstream downstreams
+                         :id id})))))
+  (-get-value [this id]
+    (cond
+      (= id ::root)
+      root
+
+      (#{:unchanged :changed} (get rx-states id))
+      (get data id)
+
+      :else
+      (if-some [{rx-fn :fn
+                 inputs :inputs} (get reactions id)]
+        (let [populated? (contains? data id)
+              args (into {}
+                         (map (juxt identity #(.-get-value this %)))
+                         inputs)]
+          (if (and
+               (not-empty inputs)
+               (every? #(= :unchanged (get rx-states %)) inputs))
+            (do
+              (set! rx-states (assoc rx-states id :unchanged))
+              (-get-value this id))
+            (let [new-v (rx-fn args)
+                  unchanged? (and populated? (= new-v (get data id)))]
+              (set! rx-states
+                    (assoc rx-states id (if unchanged?
+                                          :unchanged
+                                          :changed)))
+              (when (or (not unchanged?) (not populated?))
+                (set! data
+                      (assoc data id new-v)))
+              new-v)))
+        (throw (ex-info "No reaction found with ID!"
+                        {:id id
+                         :reactions-registered (keys reactions)})))))
+  (-has-reaction? [this id]
+    (or (= ::root id)
+        (contains? reactions id))))
+
+(defmethod clojure.core/print-method RxMap
+  [rx-map writer]
+  (.write writer (str "#<RxMap: " (pr-str (.-reactions rx-map)) " | "  (pr-str (.-root rx-map))
+                      ">")))
+
 (defn update-root-impl
   ([^RxMap rx f]
    (-swap-root! rx f))
@@ -214,12 +355,19 @@
    (-swap-root! rx fun a b c d e f args)))
 
 (defn update-root! [rx f & args]
-  (apply update-root-impl rx f args)
-  rx)
+  (apply update-root-impl rx f args))
 
 (defn reset-root! [rx v]
-  (-reset-root! rx v)
-  rx)
+  (-reset-root! rx v))
+
+(defn get-reaction-ids [^RxMap rx-map]
+  (set (conj (keys (.-reactions rx-map)) ::root)))
+
+(defn has-reaction? [^RxMap rx-map id]
+  (-has-reaction? rx-map id))
+
+(defn get-reaction [^RxMap rx-map rx-id]
+  (-get-value rx-map rx-id))
 
 ;; TODO: decide if :lazy? needs to be supported (or, conversely, if an `:eager?` option should be added.)
 
@@ -229,18 +377,18 @@
   "Expects a partial rx map and a args parameter from a reaction config.
    Based on structure of args and whether it exists in partial rx map it returns a keyword specifying the args type it expects.
    Optionally accepts a default type as a third argument."
-  ([m args]
+  ([m-or-s args]
    (cond
      (map? args) :map
      (keyword? args) :single
-     (contains? m args) :single
+     (contains? m-or-s args) :single
      (vector? args) :vector
      :else (throw (ex-info "Unknown args style!" {:args args}))))
-  ([m args default]
+  ([m-or-s args default]
    (cond
      (map? args) :map
      (keyword? args) :single
-     (contains? m args) :single
+     (contains? m-or-s args) :single
      (vector? args) :vector
      :else default)))
 
@@ -259,12 +407,10 @@
      :map
      (vec (vals args)))))
 
-
 ;; NOTE: Dynamic Construction
 
-(defn create-reactive-map [values-map]
-  (let [root (->RxRoot values-map {})]
-    (->RxMap {::root root})))
+(defn create-reactive-map [root]
+  (->RxMap {} root {} {}))
 
 (defn- wrap-args [args-format args rx-fn]
   (case  args-format
@@ -288,23 +434,25 @@
                     {:args-format args-format
                      :args        args}))))
 
-(defn parse-rx-config
+(defn- parse-rx-config
   "Transforms a reaction config map into a standard RxReaction creation map.
    Doesn't modify the `partial-rx-map` passed in, it is only used to match input reactions for args-format inferrence."
-  [m rx-config]
+  [s rx-config]
   (let [args        (or (:args rx-config) (vec (:inputs rx-config)))
         args-format (:args-format rx-config
-                                  (infer-args-format m args))
+                                  (infer-args-format s args))
         inputs      (args->inputs args-format args)
-        rx-fn       (wrap-args args-format args (:fn rx-config))]
+        rx-fn       (wrap-args args-format args
+                               (:fn rx-config))]
     {:id     (:id rx-config)
+     :args-format args-format
      :inputs inputs
      :fn     rx-fn}))
 
 (defn add-reaction! [^RxMap reactive-map rx-config]
   ;; TODO: process reaction by wrapping rx-fn and returning the low-level rx-config-map
   (->> rx-config
-       (parse-rx-config (.-reactions reactive-map))
+       (parse-rx-config (get-reaction-ids reactive-map))
        (-add-reaction! reactive-map)))
 
 
@@ -313,7 +461,7 @@
                        ;; NOTE: since infer-args-format is based on a complete map, we must set a default
                        (args->inputs
                         (or (:args-format rxn)
-                            (infer-args-format (.-reactions m) (:args rxn) :single))
+                            (infer-args-format (get-reaction-ids m) (:args rxn) :single))
                         (:args rxn)))]
       (loop [^RxMap m reactive-map
              blocked {}
@@ -328,7 +476,7 @@
           (if-let [blocks (not-empty
                            (set
                             (remove
-                             (partial contains? (.-reactions m))
+                             (partial has-reaction? m)
                              (get-inputs m rxn))))]
             (recur m
                    (assoc blocked rxn blocks)
@@ -350,14 +498,3 @@
                      blocked
                      (dissoc blocking (:id rxn))
                      (into ready (subvec rxns 1)))))))))
-
-(defn get-reaction [^RxMap rx-map rx-id]
-  (if-let [rxn (-get-reaction rx-map rx-id)]
-    (-get-value rxn)
-    (throw (ex-info "No Reaction for id."
-                    {:id rx-id
-                     :reactions (.-reactions rx-map)}))))
-
-(defn compute-reaction [rx-map _]
-  #_(println "This function is deprecated. get-reaction will do neccessary computations only once.")
-  rx-map)

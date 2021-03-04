@@ -153,6 +153,30 @@
     (is (= {:bar 1 :baz :default :a {:bar 1}}
            (:domino.core/db (core/transact ctx [{:bar 1}]))))))
 
+(deftest rx-preserved
+  (let [ctx (core/initialize {:model  [[:foo {:id :foo}]
+                                       [:bar {:id :bar}]
+                                       [:baz {:id :baz}]
+                                       [:a {:id :a}]]
+                              :events [{:inputs  [:foo :bar]
+                                        :outputs [:baz :a]
+                                        :handler (fn [{{:keys [foo bar]
+                                                        :or {foo :default}
+                                                        :as inputs} :inputs}]
+                                                   {:baz foo
+                                                    :a inputs})}]
+                              :reactions [{:id :rx/foobar
+                                           :args [:foo :bar]
+                                           :fn str}]}
+                             {:foo 1})
+        foobar-pre (core/select ctx :rx/foobar)
+        ctx-2 (core/transact ctx [{:foo 2 :bar 2}])
+        foobar-pre-2 (core/select ctx :rx/foobar)]
+    (is (= foobar-pre foobar-pre-2))
+    ))
+
+
+
 ;; TODO: add tests for new features (see below)
 ;;  - EVENTS
 ;;    - :should-run
