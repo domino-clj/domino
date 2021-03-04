@@ -87,11 +87,13 @@
                                         [:bar {:id :bar}]]
                                        [:baz {:id :baz}]
                                        [:buz {:id :buz}]]
-                              :events [{:inputs  [:baz]
+                              :events [{:id :ev/baz->bar
+                                        :inputs  [:baz]
                                         :outputs [:bar]
                                         :handler (fn [{{:keys [baz]} :inputs}]
                                                    {:bar (inc baz)})}
-                                       {:inputs  [:foo]
+                                       {:id :ev/foo->buz
+                                        :inputs  [:foo]
                                         :outputs [:buz]
                                         :handler (fn [{{:keys [foo]} :inputs}]
                                                    {:buz (inc (:bar foo))})}]}

@@ -310,6 +310,7 @@
                          inputs)]
           (if (and
                (not-empty inputs)
+               populated?
                (every? #(= :unchanged (get rx-states %)) inputs))
             (do
               (set! rx-states (assoc rx-states id :unchanged))
@@ -320,9 +321,10 @@
                     (assoc rx-states id (if unchanged?
                                           :unchanged
                                           :changed)))
-              (when (or (not unchanged?) (not populated?))
-                (set! data
-                      (assoc data id new-v)))
+              (if (or (not unchanged?) (not populated?))
+                (do
+                  (set! data
+                        (assoc data id new-v))))
               new-v)))
         (throw (ex-info "No reaction found with ID!"
                         {:id id
@@ -333,8 +335,7 @@
 
 (defmethod clojure.core/print-method RxMap
   [rx-map writer]
-  (.write writer (str "#<RxMap: " (pr-str (.-reactions rx-map)) " | "  (pr-str (.-root rx-map))
-                      ">")))
+  (.write writer (str "#<RxMap: " (pr-str (.-root rx-map)) ">")))
 
 (defn update-root-impl
   ([^RxMap rx f]
