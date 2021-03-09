@@ -200,6 +200,8 @@
       (-reset-root! this (apply fun (-get-value root) a b c d e f args)))))
 
 
+(declare compute-reaction!)
+
 (defprotocol IRxMap
   (-reset-root! [this v])
   (-swap-root! [this f]
@@ -304,14 +306,11 @@
       (get data id)
 
       (dirty id)
-      (let [{rx-fn      :fn
-             inputs     :inputs
-             downstream ::downstream} (get reactions id)
-            args (into {}
-                       (map (juxt identity #(.-get-value this %)))
-                       inputs)
+      (let [{inputs     :inputs
+             downstream ::downstream
+             :as rx} (get reactions id)
             old-v (get data id)
-            new-v (rx-fn args)]
+            new-v (compute-reaction! this rx)]
         (when (not= old-v new-v)
           (set! data  (assoc data id new-v))
           (set! dirty (union dirty downstream)))
@@ -320,9 +319,7 @@
         new-v)
 
       :else
-      (let [{rx-fn      :fn
-             inputs     :inputs
-             downstream ::downstream} (get reactions id)]
+      (let [inputs (:inputs (get reactions id))]
         (cond
           (some (conj dirty ::root) inputs)
           (set! dirty (conj dirty id))
@@ -335,6 +332,17 @@
   (-has-reaction? [this id]
     (or (= ::root id)
         (contains? reactions id))))
+
+(defn compute-reaction! [^RxMap rx-map rxn]
+  (case (:args-format rxn)
+    :single ((:fn rxn) (-get-value rx-map (:args rxn)))
+    :map    ((:fn rxn) (into {}
+                             (map (juxt key (comp (partial -get-value rx-map) val)))
+                             (:args rxn)))
+    :rx-map ((:fn rxn) (into {}
+                             (map (juxt identity (partial -get-value rx-map)))
+                             (:args rxn)))
+    :vector (apply (:fn rxn) (map (partial -get-value rx-map) (:args rxn)))))
 
 (defmethod clojure.core/print-method RxMap
   [rx-map writer]
@@ -446,9 +454,9 @@
         args-format (:args-format rx-config
                                   (infer-args-format s args))
         inputs      (args->inputs args-format args)
-        rx-fn       (wrap-args args-format args
-                               (:fn rx-config))]
+        rx-fn       (:fn rx-config)]
     {:id     (:id rx-config)
+     :args args
      :args-format args-format
      :inputs inputs
      :fn     rx-fn}))
