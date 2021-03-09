@@ -327,7 +327,7 @@
           (set! clean (conj clean id))
           :else
           (doseq [input inputs]
-            (.-get-value this input)))
+            (-get-value this input)))
         (recur id))))
   (-has-reaction? [this id]
     (or (= ::root id)
@@ -344,9 +344,10 @@
                              (:args rxn)))
     :vector (apply (:fn rxn) (map (partial -get-value rx-map) (:args rxn)))))
 
-(defmethod clojure.core/print-method RxMap
-  [rx-map writer]
-  (.write writer (str "#<RxMap: " (pr-str (.-root rx-map)) ">")))
+#?(:clj
+   (defmethod clojure.core/print-method RxMap
+     [rx-map writer]
+     (.write writer (str "#<RxMap: " (pr-str (.-root rx-map)) ">"))))
 
 (defn update-root-impl
   ([^RxMap rx f]
