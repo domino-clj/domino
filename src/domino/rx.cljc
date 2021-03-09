@@ -215,10 +215,10 @@
   (-get-value   [this id])
   (-has-reaction? [this id]))
 
-(deftype RxMap [reactions root ^:volatile-mutable data ^:volatile-mutable rx-states]
+(deftype RxMap [reactions root ^:volatile-mutable data ^:volatile-mutable clean ^:volatile-mutable dirty]
   IRxMap
   (-reset-root! [this v]
-    (RxMap. reactions v data {}))
+    (RxMap. reactions v data #{} dirty))
   (-swap-root! [this fun]
     (-reset-root! this (fun root)))
   (-swap-root! [this fun a]
@@ -262,7 +262,8 @@
         inputs)
        root
        data
-       rx-states)))
+       clean
+       (conj dirty id))))
   (-remove-reaction! [this id cascade?]
     (let [downstreams (-> reactions
                           (get id)
@@ -278,7 +279,8 @@
                  (::upstream (get reactions id)))
                 root
                 (dissoc data id)
-                (dissoc rx-states id))
+                (disj clean id)
+                (disj dirty id))
 
         cascade?
         (-remove-reaction!
@@ -298,37 +300,38 @@
       (= id ::root)
       root
 
-      (#{:unchanged :changed} (get rx-states id))
+      (clean id)
       (get data id)
 
+      (dirty id)
+      (let [{rx-fn      :fn
+             inputs     :inputs
+             downstream ::downstream} (get reactions id)
+            args (into {}
+                       (map (juxt identity #(.-get-value this %)))
+                       inputs)
+            old-v (get data id)
+            new-v (rx-fn args)]
+        (when (not= old-v new-v)
+          (set! data  (assoc data id new-v))
+          (set! dirty (union dirty downstream)))
+        (set! clean (conj clean id))
+        (set! dirty (disj dirty id))
+        new-v)
+
       :else
-      (if-some [{rx-fn :fn
-                 inputs :inputs} (get reactions id)]
-        (let [populated? (contains? data id)
-              args (into {}
-                         (map (juxt identity #(.-get-value this %)))
-                         inputs)]
-          (if (and
-               (not-empty inputs)
-               populated?
-               (every? #(= :unchanged (get rx-states %)) inputs))
-            (do
-              (set! rx-states (assoc rx-states id :unchanged))
-              (-get-value this id))
-            (let [new-v (rx-fn args)
-                  unchanged? (and populated? (= new-v (get data id)))]
-              (set! rx-states
-                    (assoc rx-states id (if unchanged?
-                                          :unchanged
-                                          :changed)))
-              (if (or (not unchanged?) (not populated?))
-                (do
-                  (set! data
-                        (assoc data id new-v))))
-              new-v)))
-        (throw (ex-info "No reaction found with ID!"
-                        {:id id
-                         :reactions-registered (keys reactions)})))))
+      (let [{rx-fn      :fn
+             inputs     :inputs
+             downstream ::downstream} (get reactions id)]
+        (cond
+          (some (conj dirty ::root) inputs)
+          (set! dirty (conj dirty id))
+          (every? clean inputs)
+          (set! clean (conj clean id))
+          :else
+          (doseq [input inputs]
+            (.-get-value this input)))
+        (recur id))))
   (-has-reaction? [this id]
     (or (= ::root id)
         (contains? reactions id))))
@@ -411,7 +414,7 @@
 ;; NOTE: Dynamic Construction
 
 (defn create-reactive-map [root]
-  (->RxMap {} root {} {}))
+  (->RxMap {} root {} #{} #{}))
 
 (defn- wrap-args [args-format args rx-fn]
   (case  args-format
