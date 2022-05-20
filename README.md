@@ -93,7 +93,7 @@ engine. For example, an effect that injects a timestamp can look as follows:
             {:ts (.getTime (java.util.Date.))})}
 ```
 
-The effect has an `:id` key specifying the unique identifier that is used be trigger the event
+The effect has an `:id` key specifying the unique identifier that is used to trigger the event
 by calling the `domino.core/trigger-effects` function. This function accepts a collection of
 event ids, e.g: `(trigger-effects ctx [:timestamp])`.
 
