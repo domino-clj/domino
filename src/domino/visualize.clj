@@ -39,6 +39,15 @@
 
 (defn adjacency [{:keys [events effects]}]
   (merge
-   (merge-with concat (nodes-inputs :events events) (nodes-inputs :effects effects))
-   (nodes-outputs :events events)
-   (nodes-outputs :effects effects)))
+   (merge-with concat (nodes-inputs :event events) (nodes-inputs :effect effects))
+   (nodes-outputs :event events)
+   (nodes-outputs :effect effects)))
+
+(defn node->descriptor [{:keys [id type]}]
+  {:label id
+   :fillcolor (case type :event "aliceblue" :effect "cornsilk" "white")
+   :style "filled"})
+
+(defn view-schema [schema]
+  (viz/view-graph (all-nodes schema) (adjacency schema)
+                  :node->descriptor node->descriptor))
