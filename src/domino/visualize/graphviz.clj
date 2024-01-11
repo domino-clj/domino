@@ -1,4 +1,4 @@
-(ns domino.vizualize
+(ns domino.vizualize.graphviz
     (:require
       [rhizome.viz :as viz]))
 
