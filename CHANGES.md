@@ -1,3 +1,9 @@
+### 0.3.3
+
+- **[BREAKING]** replaced async callback API (`:async? true` + 4-arg handler with callback) with derefable returns; async handlers now return `delay`/`future`/`promise` and the engine auto-derefs
+- on the JVM, `future` and `promise` block until resolved; in ClojureScript, `delay` is supported for lazy computation — truly async operations should use effects
+- the `:async?` flag is silently ignored for backward compatibility
+
 ### 0.3.2
 
 - - **[BREAKING]** namespaced `:change-history` key as `:domino.core/change-history`

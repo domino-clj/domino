@@ -249,3 +249,38 @@
     {::core/db             (assoc default-db :h {:i 2})
      ::core/change-history [[[:h :i] 1]
                             [[:h] {:i 2}]]}))
+
+(deftest derefable-delay-event
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [_ {:keys [a]} _]
+                 (delay {:b (inc a)}))}]
+    [[[:a] 1]]
+    {::core/db             (assoc default-db :a 1 :b 2)
+     ::core/change-history [[[:a] 1] [[:b] 2]]}))
+
+(deftest derefable-mixed-sync-async
+  (test-graph-events
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [_ {:keys [a]} _]
+                 (delay {:b (inc a)}))}
+     {:inputs  [[:b]]
+      :outputs [[:c]]
+      :handler (fn [_ {:keys [b]} _]
+                 {:c (* b 10)})}]
+    [[[:a] 1]]
+    {::core/db             (assoc default-db :a 1 :b 2 :c 20)
+     ::core/change-history [[[:a] 1] [[:b] 2] [[:c] 20]]}))
+
+(deftest derefable-nil-returns-old-outputs
+  (test-graph-events
+    (assoc default-db :b 42)
+    [{:inputs  [[:a]]
+      :outputs [[:b]]
+      :handler (fn [_ _ _]
+                 (delay nil))}]
+    [[[:a] 1]]
+    {::core/db             (assoc default-db :a 1 :b 42)
+     ::core/change-history [[[:a] 1]]}))

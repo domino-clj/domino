@@ -19,3 +19,9 @@
   (is (= {} (util/map-by-id [{:name "no id"}])))
   (is (= {:a {:id :a :name "A"}} (util/map-by-id [{:id :a :name "A"}])))
   (is (= {:a {:id :a} :b {:id :b}} (util/map-by-id [{:id :a} {:name "no id"} {:id :b}]))))
+
+(deftest resolve-result-test
+  (is (= {:b 1} (util/resolve-result {:b 1})))
+  (is (nil? (util/resolve-result nil)))
+  (is (= {:b 1} (util/resolve-result (delay {:b 1}))))
+  (is (= {:b 1} (util/resolve-result (atom {:b 1})))))

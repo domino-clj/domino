@@ -58,18 +58,21 @@ The macro requires that the `:keys` destructuring syntax is used for input and o
 expands the the event map with the `:inputs` and `:outputs` keys being inferred from the
 ones specified using the `:keys` in the event declaration.
 
-It's also possible to declare async events by providing the `:async?` key, e.g:
+Event handlers can return derefable values for lazy or async computation.
+The engine automatically detects and derefs the result before applying it:
 
 ```clojure
-{:async?  true
- :inputs  [:amount]
+{:inputs  [:amount]
  :outputs [:total]
- :handler (fn [ctx {:keys [amount]} {:keys [total]} callback]
-            (callback {:total (+ total amount)}))}
+ :handler (fn [ctx {:keys [amount]} {:keys [total]}]
+            (delay {:total (+ total amount)}))}
 ```
 
-Async event handler takes an additional argument that specifies the callback function
-that should be called with the result.
+Any type implementing `IDeref` is supported. On the JVM this includes `delay`, `future`,
+and `promise` — the engine will block until the result is available. In ClojureScript,
+`delay` can be used for lazy/memoized computation. Truly async operations (e.g. API calls)
+should be handled outside the transaction via effects: trigger a side effect, then transact
+the result back when it arrives.
 
 ### 3. Effects
 
