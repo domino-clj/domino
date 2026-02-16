@@ -14,3 +14,13 @@
 
 (defn map-by-id [items]
   (into {} (comp (filter :id) (map (juxt :id identity))) items))
+
+(defn resolve-result
+  "If x is derefable (delay, future, promise, atom), derefs it.
+  Otherwise returns x as-is."
+  [x]
+  (if (and (some? x)
+           #?(:clj  (instance? clojure.lang.IDeref x)
+              :cljs (satisfies? IDeref x)))
+    (deref x)
+    x))

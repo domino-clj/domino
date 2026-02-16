@@ -64,13 +64,13 @@
     (not pre)
     (let [post (wrap-post post)]
       (fn [ctx inputs outputs]
-        (post (handler ctx inputs outputs))))
+        (post (util/resolve-result (handler ctx inputs outputs)))))
 
     :else
     (let [handler (wrap-pre handler pre)
           post    (wrap-post post)]
       (fn [ctx inputs outputs]
-        (post (handler ctx inputs outputs))))))
+        (post (util/resolve-result (handler ctx inputs outputs)))))))
 
 (defn ids-to-interceptors
   "finds the interceptors based on the provided ids

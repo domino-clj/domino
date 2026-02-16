@@ -1,7 +1,7 @@
 (ns domino.events
   (:require
     [domino.model :as model]
-    [domino.util :refer [generate-sub-paths]]))
+    [domino.util :as util :refer [generate-sub-paths]]))
 
 (defn get-db-paths [model db paths]
   (reduce
@@ -23,17 +23,13 @@
      (.write writer (str "#<PersistentQueue: " (pr-str (vec queue)) ">"))))
 
 (defn try-event
-  ([event ctx db old-outputs] (try-event event ctx db old-outputs nil))
-  ([{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs cb]
-   (try
-     (if cb
-       (handler ctx (get-db-paths model db inputs) old-outputs
-                (fn [result] (cb (or result old-outputs))))
-       (or
-         (handler ctx (get-db-paths model db inputs) old-outputs)
-         old-outputs))
-     (catch #?(:clj Exception :cljs js/Error) e
-       (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e))))))
+  [{:keys [handler inputs] :as event} {:domino.core/keys [model] :as ctx} db old-outputs]
+  (try
+    (or
+      (util/resolve-result (handler ctx (get-db-paths model db inputs) old-outputs))
+      old-outputs)
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
 
 (defn update-ctx [ctx model old-outputs new-outputs]
   (reduce-kv
@@ -61,13 +57,9 @@
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
   [edges {::keys [db] :domino.core/keys [model] :as ctx}]
   (reduce
-   (fn [ctx {{:keys [async? outputs] :as event} :edge}]
+   (fn [ctx {{:keys [outputs] :as event} :edge}]
      (let [old-outputs (get-db-paths (:domino.core/model ctx) db outputs)]
-       (if async?
-         (try-event event ctx db old-outputs
-                    (fn [new-outputs]
-                      (update-ctx ctx model old-outputs new-outputs)))
-         (update-ctx ctx model old-outputs (try-event event ctx db old-outputs)))))
+       (update-ctx ctx model old-outputs (try-event event ctx db old-outputs))))
    ctx
    edges))
 
