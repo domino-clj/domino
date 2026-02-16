@@ -29,7 +29,12 @@
       (util/resolve-result (handler ctx (get-db-paths model db inputs) old-outputs))
       old-outputs)
     (catch #?(:clj Exception :cljs js/Error) e
-      (throw (ex-info "failed to execute event" {:event event :context ctx :db db} e)))))
+      (throw (ex-info "failed to execute event"
+                       {:inputs      inputs
+                        :outputs     (:outputs event)
+                        :input-vals  (get-db-paths model db inputs)
+                        :output-vals old-outputs}
+                       e)))))
 
 (defn update-ctx [ctx model old-outputs new-outputs]
   (reduce-kv
