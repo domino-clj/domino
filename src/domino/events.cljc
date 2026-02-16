@@ -84,16 +84,21 @@
       (let [output->idx (into {}
                           (for [[idx e] (map-indexed vector edges)
                                 o (-> e :edge :outputs)]
-                            [o idx]))]
+                            [o idx]))
+            memo (volatile! {})]
         (letfn [(depth [idx seen]
-                  (if (seen idx)
-                    0
-                    (let [dep-idxs (->> (-> (edges idx) :edge :inputs)
-                                        (keep output->idx)
-                                        (remove #{idx}))]
-                      (if (seq dep-idxs)
-                        (inc (reduce max 0 (map #(depth % (conj seen idx)) dep-idxs)))
-                        0))))]
+                  (if-let [cached (get @memo idx)]
+                    cached
+                    (let [d (if (seen idx)
+                              0
+                              (let [dep-idxs (->> (-> (edges idx) :edge :inputs)
+                                                  (keep output->idx)
+                                                  (remove #{idx}))]
+                                (if (seq dep-idxs)
+                                  (inc (reduce max 0 (map #(depth % (conj seen idx)) dep-idxs)))
+                                  0)))]
+                      (vswap! memo assoc idx d)
+                      d)))]
           (->> (range (count edges))
                (sort-by #(depth % #{}))
                (mapv edges)))))))
@@ -110,10 +115,10 @@
 
   When an node has been visited (as an input), it cannot be considered for an output"
   ([{::keys [changed-paths] :as ctx} graph]
-   (let [x  (peek changed-paths)
-         xs (pop changed-paths)]
-     ;; Select the first change to evaluate
-     (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
+   (if-let [x (peek changed-paths)]
+     (let [xs (pop changed-paths)]
+       (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x))
+     ctx))
   ([{::keys [changes] :as ctx} graph origin]
    ;; Handle the change (origin) passed in, and recur as needed
    (let [;; Select the relevant parent of the change

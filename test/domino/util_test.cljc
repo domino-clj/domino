@@ -10,3 +10,12 @@
   (is (= (util/generate-sub-paths [:grand-parent :parent :child]) (list [:grand-parent :parent :child]
                                                                    [:grand-parent :parent]
                                                                    [:grand-parent]))))
+
+(deftest generate-sub-paths-empty
+  (is (= [] (util/generate-sub-paths []))))
+
+(deftest map-by-id-test
+  (is (= {} (util/map-by-id [])))
+  (is (= {} (util/map-by-id [{:name "no id"}])))
+  (is (= {:a {:id :a :name "A"}} (util/map-by-id [{:id :a :name "A"}])))
+  (is (= {:a {:id :a} :b {:id :b}} (util/map-by-id [{:id :a} {:name "no id"} {:id :b}]))))

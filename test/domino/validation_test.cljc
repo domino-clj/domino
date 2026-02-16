@@ -43,6 +43,21 @@
                                                :effects [{:inputs  [:nonexistent]
                                                           :handler (fn [_ _])}]})))))
 
+(deftest maybe-throw-no-errors
+  (is (nil? (validation/maybe-throw-exception {:errors []}))))
+
+(deftest maybe-throw-with-errors
+  (is (thrown-with-msg?
+        #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+        #"errors found"
+        (validation/maybe-throw-exception {:errors [["some error" {}]]}))))
+
+(deftest event-input-id-not-in-model
+  (is (= [["no path found for :missing in the model" {:id :missing}]]
+         (:errors (validation/validate-schema
+                    {:model  [[:a {:id :a}]]
+                     :events [{:inputs [:missing] :outputs [:a] :handler (fn [_ _ _])}]})))))
+
 (deftest valid-ctx
   (is (empty? (:errors (validation/validate-schema {:model   [[:user {:id :user}
                                                                [:first-name {:id :fname}]

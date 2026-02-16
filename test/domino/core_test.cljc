@@ -194,6 +194,17 @@
                                                        (reset! result buz))}]})]
     (is (= {:baz 1 :buz 6} (:domino.core/db (core/transact ctx [[[:baz] 1]]))))))
 
+(deftest trigger-effects-nonexistent-id
+  (let [ctx (core/initialize {:model   [[:a {:id :a}]]
+                              :effects [{:id      :real
+                                         :outputs [:a]
+                                         :handler (fn [_ _] {:a 1})}]}
+                             {:a 0})]
+    (is (thrown-with-msg?
+          #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+          #"no effect found"
+          (core/trigger-effects ctx [:nonexistent])))))
+
 (deftest no-key-at-path
   (let [ctx (core/initialize {:model  [[:foo {:id :foo}]
                                        [:bar {:id :bar}]

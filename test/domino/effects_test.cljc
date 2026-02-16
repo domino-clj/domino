@@ -18,6 +18,17 @@
                                                      (reset! data inputs))}])})
     (is (= {:a 1} @data))))
 
+(deftest effects-deduplicated
+  (let [call-count (atom 0)]
+    (effects/execute-effects!
+      {:domino.core/change-history [[[:a] 1] [[:a] 2]]
+       :domino.core/db {:a 2}
+       :domino.core/model (model/model->paths [[:a {:id :a}]])
+       :domino.core/effects
+       (effects/effects-by-paths
+         [{:inputs [[:a]] :handler (fn [_ _] (swap! call-count inc))}])})
+    (is (= 1 @call-count))))
+
 (deftest execute-effect-error-wrapping
   (let [ctx {:domino.core/model (model/model->paths [[:a {:id :a}]])
              :domino.core/db {:a 1}}

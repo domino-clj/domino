@@ -50,6 +50,9 @@
         res->change (juxt (comp id->path first) second)
         old-outputs #(events/get-db-paths model db (map id->path (:outputs %)))
         run-effect  #(try-effect % ctx db (old-outputs %))]
+    (doseq [id effect-ids]
+      (when-not (id->effect id)
+        (throw (ex-info (str "no effect found for id " id) {:id id}))))
     (into []
           (comp (map id->effect)
                 (mapcat run-effect)
