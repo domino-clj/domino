@@ -3,14 +3,12 @@
 (defn generate-sub-paths
   "Given a `path`, generate a list of all sub-paths including `path`"
   [path]
-  (loop [paths []
-         path  path]
-    (if (not-empty path)
-      (recur (conj paths (vec path)) (drop-last path))
-      paths)))
+  (let [path (vec path)]
+    (loop [paths [path]
+           path  path]
+      (if (> (count path) 1)
+        (recur (conj paths (pop path)) (pop path))
+        paths))))
 
 (defn map-by-id [items]
-  (->> items
-       (filter #(contains? % :id))
-       (map (juxt :id identity))    
-       (into {})))
+  (into {} (comp (filter :id) (map (juxt :id identity))) items))

@@ -9,10 +9,10 @@
 
 #?(:clj
    (defmacro event [[_ in out :as args] & body]
-     (let [in-ks#  (mapv keyword (:keys in))
-           out-ks# (mapv keyword (:keys out))]
-       {:inputs  in-ks#
-        :outputs out-ks#
+     (let [in-ks  (mapv keyword (:keys in))
+           out-ks (mapv keyword (:keys out))]
+       {:inputs  in-ks
+        :outputs out-ks
         :handler `(fn ~(vec args) ~@body)})))
 
 (defn transact
@@ -27,8 +27,7 @@
 (defn initial-transaction
   "If initial-db is not empty, transact with initial db as changes"
   [{::keys [model] :as ctx} initial-db]
-  (if (empty? initial-db)
-    ctx
+  (if (seq initial-db)
     (transact ctx
               (reduce
                 (fn [inputs [_ path]]
@@ -36,7 +35,8 @@
                     (conj inputs [path v])
                     inputs))
                 []
-                (:id->path model)))))
+                (:id->path model)))
+    ctx))
 
 (defn initialize
   "Takes a schema of :model, :events, and :effects

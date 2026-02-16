@@ -45,13 +45,13 @@
       (throw (ex-info "failed to execute effect" {:effect effect :context ctx :db db} e)))))
 
 (defn effect-outputs-as-changes [{:domino.core/keys [effects-by-id db model] :as ctx} effect-ids]
-  (let [id->effect  #(get-in effects-by-id [%])
-        id->path    #(get-in model [:id->path %])
+  (let [id->effect  effects-by-id
+        id->path    (:id->path model)
         res->change (juxt (comp id->path first) second)
         old-outputs #(events/get-db-paths model db (map id->path (:outputs %)))
         run-effect  #(try-effect % ctx db (old-outputs %))]
-    (->> effect-ids
-         (map id->effect)
-         (map run-effect)
-         (mapcat identity)
-         (map res->change))))
+    (into []
+          (comp (map id->effect)
+                (mapcat run-effect)
+                (map res->change))
+          effect-ids)))

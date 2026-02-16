@@ -23,7 +23,7 @@
              (validate-event ev errors)])
           [{} {}]
           events)]
-    (if-not (empty? errors)
+    (if (seq errors)
       (throw (ex-info
                "graph contains invalid events"
                {:errors errors}))
