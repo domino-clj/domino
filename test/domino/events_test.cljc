@@ -90,7 +90,7 @@
       :handler (fn [_ {:keys [a c]} _] {:d (+ a c)})}]
     [[[:a] 1]]
     {::core/db             (assoc default-db :a 1 :c 1 :d 2)
-     ::core/change-history [[[:a] 1] [[:c] 1] [[:d] 1] [[:d] 2]]}))
+     ::core/change-history [[[:a] 1] [[:c] 1] [[:d] 2]]}))
 
 (deftest exception-bubbles-up
   (is

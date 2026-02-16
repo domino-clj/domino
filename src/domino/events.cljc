@@ -55,10 +55,11 @@
   ::changed-paths => queue of affected paths
   ::db => temporary relevant db within context
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
-  [edges {::keys [db] :domino.core/keys [model] :as ctx}]
+  [edges {:domino.core/keys [model] :as ctx}]
   (reduce
    (fn [ctx {{:keys [outputs] :as event} :edge}]
-     (let [old-outputs (get-db-paths (:domino.core/model ctx) db outputs)]
+     (let [db          (::db ctx)
+           old-outputs (get-db-paths model db outputs)]
        (update-ctx ctx model old-outputs (try-event event ctx db old-outputs))))
    ctx
    edges))
