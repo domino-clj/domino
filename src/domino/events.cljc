@@ -126,7 +126,15 @@
          ;; Get the new graph with the handled origin removed
          removed-origin (dissoc graph focal-origin)
          ;; Call `ctx-updater` to handle the changes associated with the given edge
+         old-db         (::db ctx)
          {::keys [changed-paths] :as new-ctx} (ctx-updater edges ctx)
+         new-ctx        (if (and (seq edges) (not= old-db (::db new-ctx)))
+                          (let [db-hash (hash (::db new-ctx))]
+                            (when (contains? (::db-hashes new-ctx) db-hash)
+                              (throw (ex-info "Repeated DB state within transaction!"
+                                              {:id ::cyclic-transaction})))
+                            (update new-ctx ::db-hashes conj db-hash))
+                          new-ctx)
          x              (peek changed-paths)
          xs             (pop changed-paths)]
      (if x
@@ -143,7 +151,8 @@
                                         (update ::changes conj [path value])))
                                   (assoc ctx ::db db
                                              ::changed-paths empty-queue
-                                             ::changes [])
+                                             ::changes []
+                                             ::db-hashes #{})
                                   inputs)
                                 graph)]
     (assoc ctx :domino.core/db db

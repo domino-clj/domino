@@ -20,9 +20,21 @@
 
   Assumes all changes are associative changes (i.e. vectors or hashmaps)"
   [ctx changes]
-  (let [updated-ctx (events/execute-events ctx changes)]
-    (effects/execute-effects! updated-ctx)
-    updated-ctx))
+  (try
+    (let [updated-ctx (events/execute-events ctx changes)]
+      (effects/execute-effects! updated-ctx)
+      (assoc updated-ctx
+             ::transaction-report
+             {:status  :complete
+              :changes (::change-history updated-ctx)}))
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info (ex-message e)
+                      (assoc (or (ex-data e) {})
+                             ::transaction-report
+                             {:status  :failed
+                              :reason  (:id (ex-data e))
+                              :message (ex-message e)})
+                      e)))))
 
 (defn initial-transaction
   "If initial-db is not empty, transact with initial db as changes"

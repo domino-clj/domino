@@ -25,3 +25,24 @@
   (is (nil? (util/resolve-result nil)))
   (is (= {:b 1} (util/resolve-result (delay {:b 1}))))
   (is (= {:b 1} (util/resolve-result (atom {:b 1})))))
+
+(deftest dissoc-in-test
+  (is (= {:a {:b {:d 4}}}
+         (util/dissoc-in {:a {:b {:c 3 :d 4}}} [:a :b :c])))
+  (is (= {:a {:other 1}}
+         (util/dissoc-in {:a {:b {:c 3} :other 1}} [:a :b :c]))
+      "removes empty parent maps")
+  (is (= {}
+         (util/dissoc-in {:a {:b {:c 3}}} [:a :b :c]))
+      "removes all empty ancestors")
+  (is (= {:b 2}
+         (util/dissoc-in {:a 1 :b 2} [:a]))
+      "works with single key")
+  (is (= {:a 1}
+         (util/dissoc-in {:a 1} [:b]))
+      "no-op when key missing"))
+
+(deftest random-uuid-test
+  (let [id (util/random-uuid)]
+    (is (some? id))
+    (is (not= id (util/random-uuid)))))
