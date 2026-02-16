@@ -1,4 +1,5 @@
-(ns domino.util)
+(ns domino.util
+  (:refer-clojure :exclude [random-uuid]))
 
 (defn generate-sub-paths
   "Given a `path`, generate a list of all sub-paths including `path`"
@@ -24,3 +25,15 @@
               :cljs (satisfies? IDeref x)))
     (deref x)
     x))
+
+(defn dissoc-in [m [k & ks]]
+  (if-some [submap (and ks
+                        (some-> m
+                                (get k)
+                                (dissoc-in ks)
+                                (not-empty)))]
+    (assoc m k submap)
+    (dissoc m k)))
+
+(defn random-uuid []
+  (clojure.core/random-uuid))

@@ -215,3 +215,32 @@
                                                    {:bar (inc bar) :baz foo})}]})]
     (:domino.core/db (core/transact ctx [[[:bar] 1]]))
     (is (= {:bar 2 :baz :default} (:domino.core/db (core/transact ctx [[[:bar] 1]]))))))
+
+(deftest transaction-report-success
+  (let [ctx (core/initialize {:model  [[:a {:id :a}]
+                                       [:b {:id :b}]]
+                              :events [{:inputs  [:a]
+                                        :outputs [:b]
+                                        :handler (fn [_ {:keys [a]} _] {:b (inc a)})}]}
+                             {:a 0 :b 0})
+        result (core/transact ctx [[[:a] 1]])]
+    (is (= :complete (get-in result [::core/transaction-report :status])))
+    (is (vector? (get-in result [::core/transaction-report :changes])))))
+
+(deftest transaction-report-failure
+  (let [ctx (core/initialize {:model  [[:a {:id :a}]
+                                       [:b {:id :b}]]
+                              :events [{:inputs  [:a]
+                                        :outputs [:b]
+                                        :handler (fn [_ {:keys [a]} _]
+                                                   (if (= a 99)
+                                                     (throw (ex-info "boom" {:id :test-error}))
+                                                     {:b (inc a)}))}]}
+                             {:a 0 :b 0})]
+    (try
+      (core/transact ctx [[[:a] 99]])
+      (is false "should have thrown")
+      (catch #?(:clj Exception :cljs js/Error) e
+        (let [report (::core/transaction-report (ex-data e))]
+          (is (= :failed (:status report)))
+          (is (some? (:message report))))))))

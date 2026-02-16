@@ -284,3 +284,25 @@
     [[[:a] 1]]
     {::core/db             (assoc default-db :a 1 :b 42)
      ::core/change-history [[[:a] 1]]}))
+
+(deftest cyclic-transaction-detection
+  ;; The cycle detection catches repeated DB states as a safety net.
+  ;; We verify the mechanism by pre-seeding ::db-hashes with the hash
+  ;; of the expected output state, simulating a cycle.
+  (let [model (model/model->paths [[:a {:id :a}] [:b {:id :b}]])
+        evts  [{:inputs  [[:a]]
+                :outputs [[:b]]
+                :handler (fn [_ {:keys [a]} _] {:b (inc a)})}]
+        graph (graph/gen-ev-graph evts)
+        target-db {:a 1 :b 2}]
+    (is (thrown-with-msg?
+          #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+          #"Repeated DB state within transaction"
+          (events/eval-traversed-edges
+            {::core/db                {:a 0 :b 0}
+             ::core/model             model
+             :domino.events/db        {:a 1 :b 0}
+             :domino.events/changed-paths (conj events/empty-queue [:a])
+             :domino.events/changes   [[[:a] 1]]
+             :domino.events/db-hashes #{(hash target-db)}}
+            graph)))))
