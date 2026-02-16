@@ -18,8 +18,11 @@
   (mapcat (fn [path] (get effects path))
           changes))
 
-(defn execute-effect! [{:domino.core/keys [model db] :as ctx} {:keys [inputs handler]}]
-  (handler ctx (events/get-db-paths model db inputs)))
+(defn execute-effect! [{:domino.core/keys [model db] :as ctx} {:keys [inputs handler] :as effect}]
+  (try
+    (handler ctx (events/get-db-paths model db inputs))
+    (catch #?(:clj Exception :cljs js/Error) e
+      (throw (ex-info "failed to execute effect" {:effect effect :context ctx :db db} e)))))
 
 (defn execute-effects!
   [{:domino.core/keys [change-history effects] :as ctx}]
@@ -33,7 +36,7 @@
     (->> (map first change-history)
          (mapcat generate-sub-paths)
          distinct
-         (change-effects effects))))                        ;; TODO: double check this approach when changes is a sequential history
+         (change-effects effects))))
 
 (defn try-effect [{:keys [handler] :as effect} ctx db old-outputs]
   (try
@@ -48,7 +51,6 @@
         old-outputs #(events/get-db-paths model db (map id->path (:outputs %)))
         run-effect  #(try-effect % ctx db (old-outputs %))]
     (->> effect-ids
-         ;; TODO: transduce
          (map id->effect)
          (map run-effect)
          (mapcat identity)

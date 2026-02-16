@@ -84,7 +84,6 @@
        (remove nil?)
        (not-empty)))
 
-;;TODO ensure all keys are unique!
 (defn connect-events [{:keys [path->id id->path id->opts]} events]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv
@@ -97,12 +96,12 @@
               (update :handler wrap pre post))))
       events)))
 
-(defn connect-effects [{:keys [id->path]} events]
+(defn connect-effects [{:keys [id->path]} effects]
   (let [path-for-id (fn [id] (get id->path id))]
     (mapv
-      (fn [event]
-        (-> event
+      (fn [effect]
+        (-> effect
             (update :inputs #(map path-for-id %))
             (update :outputs #(map path-for-id %))))
-      events)))
+      effects)))
 

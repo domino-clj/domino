@@ -35,6 +35,14 @@
                                                          :outputs [:full-name]
                                                          :handler (fn [_ _ _])}]})))))
 
+(deftest effect-id-not-in-model
+  (is (= [["no path found for :nonexistent in the model" {:id :nonexistent}]]
+         (:errors (validation/validate-schema {:model   [[:user {:id :user}
+                                                           [:first-name {:id :fname}]]]
+                                               :events  []
+                                               :effects [{:inputs  [:nonexistent]
+                                                          :handler (fn [_ _])}]})))))
+
 (deftest valid-ctx
   (is (empty? (:errors (validation/validate-schema {:model   [[:user {:id :user}
                                                                [:first-name {:id :fname}]
