@@ -1,12 +1,13 @@
-(ns domino.vizualize.graphviz
+(ns domino.visualize.graphviz
     (:require
       [rhizome.viz :as viz]))
 
-(defn zip-keys [keys v]
+(defn- zip-keys [keys v]
   (zipmap keys (repeat v)))
 
 (defn- model-ids [model]
   (keep :id (flatten model)))
+
 (defn- id-or-fn [{:keys [id handler]}]
   (or id (str handler)))
 (defn- make-node [type node]

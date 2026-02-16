@@ -231,6 +231,14 @@
     {::core/db             (assoc default-db :a 1 :b 6)
      ::core/change-history [[[:a] 1] [[:b] 6]]}))
 
+(deftest execute-events-empty-inputs
+  (test-graph-events
+    [{:inputs [[:a]] :outputs [[:b]]
+      :handler (fn [_ _ _] {:b 1})}]
+    []
+    {::core/db default-db
+     ::core/change-history []}))
+
 (deftest triggering-sub-path
   (test-graph-events
     [{:inputs  [[:h]]

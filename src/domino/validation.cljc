@@ -12,18 +12,23 @@
     ctx
     (mapcat flatten model)))
 
-(defn check-valid-events [{:keys [events path-ids] :as ctx}]
-  (let [id-in-path? (partial contains? path-ids)]
-    (reduce
-      (fn [ctx id]
-        (if (id-in-path? id)
-          ctx
-          (update ctx :errors conj [(str "no path found for " id " in the model") {:id id}])))
-      ctx
-      (mapcat (comp flatten (juxt :inputs :outputs)) events))))
+(defn- check-ids-in-model [{:keys [path-ids] :as ctx} ids]
+  (reduce
+    (fn [ctx id]
+      (if (contains? path-ids id)
+        ctx
+        (update ctx :errors conj [(str "no path found for " id " in the model") {:id id}])))
+    ctx
+    ids))
+
+(defn check-valid-events [{:keys [events] :as ctx}]
+  (check-ids-in-model ctx (mapcat (comp flatten (juxt :inputs :outputs)) events)))
+
+(defn check-valid-effects [{:keys [effects] :as ctx}]
+  (check-ids-in-model ctx (mapcat (comp flatten :inputs) effects)))
 
 (defn maybe-throw-exception [{:keys [errors]}]
-  (when (not-empty errors)
+  (when (seq errors)
     (throw (ex-info (str "errors found while validating schema") {:errors errors}))))
 
 (defn validate-schema [ctx]
@@ -31,4 +36,5 @@
       (assoc :path-ids #{}
              :errors [])
       check-valid-model
-      check-valid-events))
+      check-valid-events
+      check-valid-effects))

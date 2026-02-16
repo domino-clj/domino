@@ -1,8 +1,7 @@
 (ns domino.events
   (:require
     [domino.model :as model]
-    [domino.util :refer [generate-sub-paths]]
-    [clojure.set :refer [union]]))
+    [domino.util :refer [generate-sub-paths]]))
 
 (defn get-db-paths [model db paths]
   (reduce
@@ -43,7 +42,7 @@
       (if (not= (get old-outputs id) new-value)
         (let [path (get-in model [:id->path id])]
           (-> ctx
-              (update ::changed-paths (fnil (partial reduce conj) empty-queue)
+              (update ::changed-paths (fnil into empty-queue)
                       (generate-sub-paths path))
               (update ::db assoc-in path new-value)
               (update ::changes conj [path new-value])))
@@ -75,27 +74,57 @@
 (defn input? [edge]
   (= :input (:relationship edge)))
 
+(defn- sort-edges-by-deps
+  "Topologically sorts edges so that events whose outputs feed into
+  other events' inputs are processed first."
+  [edges]
+  (let [edges (vec edges)]
+    (if (<= (count edges) 1)
+      edges
+      (let [output->idx (into {}
+                          (for [[idx e] (map-indexed vector edges)
+                                o (-> e :edge :outputs)]
+                            [o idx]))
+            memo (volatile! {})]
+        (letfn [(depth [idx seen]
+                  (if-let [cached (get @memo idx)]
+                    cached
+                    (let [d (if (seen idx)
+                              0
+                              (let [dep-idxs (->> (-> (edges idx) :edge :inputs)
+                                                  (keep output->idx)
+                                                  (remove #{idx}))]
+                                (if (seq dep-idxs)
+                                  (inc (reduce max 0 (map #(depth % (conj seen idx)) dep-idxs)))
+                                  0)))]
+                      (vswap! memo assoc idx d)
+                      d)))]
+          (->> (range (count edges))
+               (sort-by #(depth % #{}))
+               (mapv edges)))))))
+
 (defn origin-path [graph origin]
   (loop [origin (vec origin)]
-    (or (when (empty? origin) ::does-not-exist)
-        (when (contains? graph origin) origin)
-        (recur (subvec origin 0 (dec (count origin)))))))
+    (cond
+      (empty? origin)          ::does-not-exist
+      (contains? graph origin) origin
+      :else                    (recur (subvec origin 0 (dec (count origin)))))))
 
 (defn eval-traversed-edges
   "Given an origin and graph, update context with edges.
 
   When an node has been visited (as an input), it cannot be considered for an output"
   ([{::keys [changed-paths] :as ctx} graph]
-   (let [x  (peek changed-paths)
-         xs (pop changed-paths)]
-     ;; Select the first change to evaluate
-     (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x)))
+   (if-let [x (peek changed-paths)]
+     (let [xs (pop changed-paths)]
+       (eval-traversed-edges (assoc ctx ::changed-paths xs) graph x))
+     ctx))
   ([{::keys [changes] :as ctx} graph origin]
    ;; Handle the change (origin) passed in, and recur as needed
    (let [;; Select the relevant parent of the change
          focal-origin   (origin-path graph origin)
          ;; Get the edges of type :input for the focal-origin
-         edges          (filter input? (get graph focal-origin #{}))
+         edges          (sort-edges-by-deps (filter input? (get graph focal-origin #{})))
          ;; Get the new graph with the handled origin removed
          removed-origin (dissoc graph focal-origin)
          ;; Call `ctx-updater` to handle the changes associated with the given edge
@@ -116,20 +145,8 @@
                                         (update ::changes conj [path value])))
                                   (assoc ctx ::db db
                                              ::changed-paths empty-queue
-                                             ;; ::executed-events #{}
                                              ::changes [])
                                   inputs)
                                 graph)]
     (assoc ctx :domino.core/db db
                :domino.core/change-history changes)))
-
-(defn events-inputs-as-changes [{:domino.core/keys [events-by-id db]} event-ids]
-  (reduce
-    (fn [changes event-id]
-      (let [inputs (get-in events-by-id [event-id :inputs])]
-        (concat changes
-                (map (fn [path]
-                       [path (get-in db path)])
-                     inputs))))
-    []
-    event-ids))

@@ -1,0 +1,76 @@
+name: Test
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: DeLaGuardo/setup-clojure@13.2
+        with:
+          lein: latest
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.m2
+          key: m2-${{ hashFiles('project.clj') }}
+          restore-keys: m2-
+
+      - name: Test CLJ
+        run: lein test
+
+      - name: Test CLJS
+        run: lein with-profile test doo node once
+
+  deploy-docs:
+    needs: test
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check for doc changes
+        id: check
+        run: |
+          if git diff --name-only HEAD~1 | grep -qE '^(README.md|docs/|\.github/workflows/test\.yml)'; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.changed == 'true'
+        with:
+          node-version: 20
+
+      - name: Build and deploy docs
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: |
+          cd docs
+          npm install
+          npx lumo compile.cljs
+          git clone https://${GH_TOKEN}@github.com/domino-clj/domino-clj.github.io.git
+          cp -r out/* domino-clj.github.io/
+          cd domino-clj.github.io
+          git config user.email "carmen.wla@gmail.com"
+          git config user.name "Carmen La"
+          git diff-index --quiet HEAD || (git add --all && git commit -am "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" && git push --force origin master)

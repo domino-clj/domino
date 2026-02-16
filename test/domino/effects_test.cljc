@@ -17,3 +17,29 @@
                          [{:inputs [[:a]] :handler (fn [ctx inputs]
                                                      (reset! data inputs))}])})
     (is (= {:a 1} @data))))
+
+(deftest effects-deduplicated
+  (let [call-count (atom 0)]
+    (effects/execute-effects!
+      {:domino.core/change-history [[[:a] 1] [[:a] 2]]
+       :domino.core/db {:a 2}
+       :domino.core/model (model/model->paths [[:a {:id :a}]])
+       :domino.core/effects
+       (effects/effects-by-paths
+         [{:inputs [[:a]] :handler (fn [_ _] (swap! call-count inc))}])})
+    (is (= 1 @call-count))))
+
+(deftest execute-effect-error-wrapping
+  (let [ctx {:domino.core/model (model/model->paths [[:a {:id :a}]])
+             :domino.core/db {:a 1}}
+        effect {:inputs [[:a]]
+                :handler (fn [_ _] (throw (ex-info "boom" {})))}]
+    (is (thrown-with-msg?
+          #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
+          #"failed to execute effect"
+          (effects/execute-effect! ctx effect)))
+    (try
+      (effects/execute-effect! ctx effect)
+      (catch #?(:clj Exception :cljs js/Error) e
+        (is (= effect (:effect (ex-data e))))
+        (is (contains? (ex-data e) :context))))))

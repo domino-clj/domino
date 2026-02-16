@@ -17,7 +17,7 @@
                             (assoc mapped-paths id {:path path
                                                     :opts opts})
                             mapped-paths)]
-         (if-not (empty? children)
+         (if (seq children)
            (apply merge (map (partial paths-by-id mapped-paths path) children))
            mapped-paths))
        mapped-paths))))
@@ -33,11 +33,10 @@
     (apply merge (map paths-by-id model))))
 
 (defn id-for-path [{:keys [path->id]} path]
-  (loop [path-segment path]
-    (when-not (empty? path-segment)
-      (if-let [id (get path->id path-segment)]
-        id
-        (recur (butlast path-segment))))))
+  (loop [path (vec path)]
+    (when (seq path)
+      (or (get path->id path)
+          (recur (pop path))))))
 
 (defn wrap-pre [handler pre]
   (let [[interceptor & pre] (reverse pre)]
@@ -56,13 +55,13 @@
 
 (defn wrap [handler pre post]
   (cond
-    (and (empty? pre) (empty? post))
+    (and (not pre) (not post))
     handler
 
-    (empty? post)
+    (not post)
     (wrap-pre handler pre)
 
-    (empty? pre)
+    (not pre)
     (let [post (wrap-post post)]
       (fn [ctx inputs outputs]
         (post (handler ctx inputs outputs))))
@@ -84,25 +83,22 @@
        (remove nil?)
        (not-empty)))
 
-;;TODO ensure all keys are unique!
 (defn connect-events [{:keys [path->id id->path id->opts]} events]
-  (let [path-for-id (fn [id] (get id->path id))]
-    (mapv
-      (fn [{:keys [inputs] :as event}]
-        (let [pre  (ids-to-interceptors path->id id->path id->opts inputs :pre)
-              post (ids-to-interceptors path->id id->path id->opts inputs :post)]
-          (-> event
-              (update :inputs #(map path-for-id %))
-              (update :outputs #(map path-for-id %))
-              (update :handler wrap pre post))))
-      events)))
-
-(defn connect-effects [{:keys [id->path]} events]
-  (let [path-for-id (fn [id] (get id->path id))]
-    (mapv
-      (fn [event]
+  (mapv
+    (fn [{:keys [inputs] :as event}]
+      (let [pre  (ids-to-interceptors path->id id->path id->opts inputs :pre)
+            post (ids-to-interceptors path->id id->path id->opts inputs :post)]
         (-> event
-            (update :inputs #(map path-for-id %))
-            (update :outputs #(map path-for-id %))))
-      events)))
+            (update :inputs #(mapv id->path %))
+            (update :outputs #(mapv id->path %))
+            (update :handler wrap pre post))))
+    events))
+
+(defn connect-effects [{:keys [id->path]} effects]
+  (mapv
+    (fn [effect]
+      (-> effect
+          (update :inputs #(mapv id->path %))
+          (update :outputs #(mapv id->path %))))
+    effects))
 

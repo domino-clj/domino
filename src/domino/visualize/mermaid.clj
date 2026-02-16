@@ -4,10 +4,10 @@
 
 (defn- clean-arg [s]
   (-> s str
-      (.replace "-" "_")
-      (.replace ":" "")))
+      (string/replace "-" "_")
+      (string/replace ":" "")))
 
-(defn format-md [s & args]
+(defn- format-md [s & args]
   (apply format s (map clean-arg args)))
 
 (defn- node [{:keys [id handler inputs outputs]}]
@@ -22,4 +22,4 @@
 
 (defn state-diagram [schema]
   (string/join "\n"
-               (conj (nodes schema) "stateDiagram-v2")))
+               (cons "stateDiagram-v2" (nodes schema))))
