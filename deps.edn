@@ -1,0 +1,12 @@
+;; tools.deps manifest, so domino is consumable as a git dependency, e.g.
+;;
+;;   io.github.domino-clj/domino {:git/tag "v0.4.0" :git/sha "<sha>"}
+;;
+;; The core data-flow engine (domino.core and its requires) has no runtime
+;; dependencies beyond Clojure, which the consumer provides. Only graph
+;; visualization (domino.visualize.graphviz) needs rhizome — opt in via the
+;; :visualize alias.
+{:paths ["src"]
+ :deps  {}
+ :aliases
+ {:visualize {:extra-deps {rhizome/rhizome {:mvn/version "0.2.9"}}}}}
