@@ -1,7 +1,7 @@
 
 <h1><img src="logo/logo.png" title="" style="margin-bottom: -10px; margin-right: 10px;" width="85px"><a href="https://github.com/domino-clj/domino">Domino</a></h1>
 
-[![CircleCI](https://img.shields.io/circleci/build/gh/domino-clj/domino?label=CircleCI&logo=circleci&style=flat-square)](https://circleci.com/gh/domino-clj/domino) [![Clojars Project](https://img.shields.io/clojars/v/domino/core?&style=flat-square)](https://clojars.org/domino/core) [![Slack](https://img.shields.io/badge/slack-%40clojurians%2Fdomino--clj-blue?logo=slack&style=flat-square)](https://clojurians.slack.com/messages/domino-clj) [![Clojars Downloads](https://img.shields.io/clojars/dt/domino/core?color=blue&style=flat-square)](https://clojars.org/domino/core) [![GitHub Stars](https://img.shields.io/github/stars/domino-clj/domino?logo=github&style=flat-square)](https://github.com/domino-clj/domino/stargazers)
+[![Clojars Project](https://img.shields.io/clojars/v/domino/core?&style=flat-square)](https://clojars.org/domino/core) [![Slack](https://img.shields.io/badge/slack-%40clojurians%2Fdomino--clj-blue?logo=slack&style=flat-square)](https://clojurians.slack.com/messages/domino-clj) [![Clojars Downloads](https://img.shields.io/clojars/dt/domino/core?color=blue&style=flat-square)](https://clojars.org/domino/core) [![GitHub Stars](https://img.shields.io/github/stars/domino-clj/domino?logo=github&style=flat-square)](https://github.com/domino-clj/domino/stargazers)
 
 
 <h3 class="hidden">See <a href="https://domino-clj.github.io">here</a> for interactive documentation.</h3>
