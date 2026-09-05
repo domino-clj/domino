@@ -210,7 +210,8 @@
                                        [:bar {:id :bar}]
                                        [:baz {:id :baz}]]
                               :events [{:inputs  [:foo :bar]
-                                        :outputs [:baz]
+                                        ;; :bar is written as well as read, so it must be declared
+                                        :outputs [:bar :baz]
                                         :handler (fn [ctx {:keys [foo bar] :or {foo :default}} _]
                                                    {:bar (inc bar) :baz foo})}]})]
     (:domino.core/db (core/transact ctx [[[:bar] 1]]))
@@ -244,3 +245,77 @@
         (let [report (::core/transaction-report (ex-data e))]
           (is (= :failed (:status report)))
           (is (some? (:message report))))))))
+
+(deftest undeclared-outputs-are-rejected
+  (testing "an event may only write the ids it declared in :outputs"
+    (let [schema {:model  [[:a {:id :a}] [:b {:id :b}] [:c {:id :c}]]
+                  :events [{:id      :writes-c-without-saying-so
+                            :inputs  [:a]
+                            :outputs [:b]
+                            :handler (fn [_ {:keys [a]} _] {:b a :c a})}]}]
+      (try
+        (core/initialize schema {:a 0 :b 0 :c 0})
+        (is false "should have thrown")
+        (catch #?(:clj Exception :cljs js/Error) e
+          (let [data (ex-data e)]
+            (is (= :domino.events/undeclared-outputs
+                   (get-in data [::core/transaction-report :reason])))
+            (is (= [:c] (:undeclared data)))
+            (is (= :writes-c-without-saying-so (:event data)))))))))
+
+(deftest event-runs-once-per-transaction
+  (testing "a transaction that changes several of an event's inputs still runs
+            the handler once, with all of them settled"
+    (let [runs (atom 0)
+          ctx  (core/initialize
+                 {:model  [[:x {:id :x}] [:y {:id :y}] [:sum {:id :sum}]]
+                  :events [{:id      :add
+                            :inputs  [:x :y]
+                            :outputs [:sum]
+                            :handler (fn [_ {:keys [x y]} _]
+                                       (swap! runs inc)
+                                       {:sum (+ x y)})}]}
+                 {:x 0 :y 0 :sum 0})
+          _    (reset! runs 0)
+          db   (::core/db (core/transact ctx [[[:x] 1] [[:y] 2]]))]
+      (is (= 1 @runs))
+      (is (= 3 (:sum db))))))
+
+(deftest accumulating-handler-accumulates-once
+  (testing "a handler that folds into its own output -- which the old-outputs
+            argument invites -- is not applied twice for one transaction"
+    (let [ctx (core/initialize
+                {:model  [[:x {:id :x}] [:y {:id :y}] [:log {:id :log}]]
+                 :events [{:id      :record
+                           :inputs  [:x :y]
+                           :outputs [:log]
+                           :handler (fn [_ {:keys [x y]} {:keys [log]}]
+                                      {:log (conj (vec log) [x y])})}]}
+                {:x 0 :y 0 :log []})]
+      (is (= [[0 0]] (:log (::core/db ctx))))
+      (is (= [[0 0] [1 2]]
+             (:log (::core/db (core/transact ctx [[[:x] 1] [[:y] 2]]))))))))
+
+(deftest events-run-again-in-the-next-transaction
+  (testing "the once-per-transaction rule does not leak across transactions"
+    (let [runs (atom 0)
+          ctx  (core/initialize
+                 {:model  [[:in {:id :in}] [:mid {:id :mid}] [:out {:id :out}]]
+                  :events [{:id      :derive
+                            :inputs  [:in]
+                            :outputs [:mid]
+                            :handler (fn [_ {:keys [in]} _] {:mid (* 10 in)})}
+                           {:id      :combine
+                            :inputs  [:in :mid]
+                            :outputs [:out]
+                            :handler (fn [_ {:keys [in mid]} _]
+                                       (swap! runs inc)
+                                       {:out (+ in mid)})}]}
+                 {:in 0 :mid 0 :out 0})
+          _    (reset! runs 0)
+          ctx  (core/transact ctx [[[:in] 1]])]
+      (is (= 1 @runs))
+      (is (= 11 (:out (::core/db ctx))) "and it saw the derived value, not a stale one")
+      (let [ctx (core/transact ctx [[[:in] 2]])]
+        (is (= 2 @runs))
+        (is (= 22 (:out (::core/db ctx))))))))
