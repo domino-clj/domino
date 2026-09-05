@@ -30,7 +30,7 @@ For example, `[:amount {:id :amount}]` is the path entry to the `:amount` key wi
 
 The events define the business logic associated with the changes of the model. Whenever a value is transacted, associated events are computed. Events are defined by three keys; an `:inputs` vector, an `:outputs` vector, and a `:handler` function.
 
-The handler accepts three arguments: a context containing the current state of the engine, a list of the input values, and a list of the output values. The function should produce a vector of outputs matching the declared `:outputs` key. For example:
+The handler accepts three arguments: a context containing the current state of the engine, a list of the input values, and a list of the output values. The function should produce a map of outputs matching the declared `:outputs` key — returning any other id fails the transaction with `:domino.events/undeclared-outputs`, since an event that writes outside its declared outputs is invisible to the graph. For example:
 
 ```clojure
 {:inputs  [:amount]
@@ -146,7 +146,7 @@ This schema declaration is a map containing three keys:
 
 Using a unified model referenced by the event functions allows us to easily tell how a particular piece of business logic is triggered.
 
-The event engine generates a direct acyclic graph (DAG) based on the `:input` keys declared by each event that's used to compute the new state in a transaction. This approach removes any ambiguity regarding when and how business logic is executed.
+The event engine generates a direct acyclic graph (DAG) based on the `:input` keys declared by each event that's used to compute the new state in a transaction. This approach removes any ambiguity regarding when and how business logic is executed. Within one transaction an event runs at most once for a given set of input values, so a transaction that changes several of an event's inputs runs its handler once, with all of them settled.
 
 Domino explicitly separates the code that modifies the state of the data from the code that causes side effects. This encourages keeping business logic pure and keeping the effects at the edges of the application.
 
@@ -199,7 +199,7 @@ Finally, let's update the `:amount` to a value that triggers an effect.
 
 Domino provides the ability to add interceptors pre and post event execution. Interceptors are defined in the schema's model. If there are multiple interceptors applicable, they are composed together.
 
-In the metadata map for a model key, you can add a `:pre` and `:post` key to define these interceptors.
+In the metadata map for a model key, you can add a `:pre` and `:post` key to define these interceptors. An interceptor is collected from the paths an event **reads**: a `:pre`/`:post` on a model key wraps every event that names that key (or a parent of it) in its `:inputs`, not the events that write it.
 Returning a `nil` value from an interceptor will short circuit execution. For example, we could check
 if the context is authorized before running the events as follows:
 

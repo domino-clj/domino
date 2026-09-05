@@ -36,10 +36,26 @@
                         :output-vals old-outputs}
                        e)))))
 
-(defn update-ctx [ctx model old-outputs new-outputs]
+(defn declared-output-ids
+  "The ids an event is allowed to write, from the output paths on the event."
+  [model outputs]
+  (into #{} (map (partial model/id-for-path model)) outputs))
+
+(defn update-ctx [ctx model event old-outputs new-outputs]
+  (let [declared   (declared-output-ids model (:outputs event))
+        undeclared (remove declared (keys new-outputs))]
+    (when (seq undeclared)
+      (throw (ex-info (str "event handler returned undeclared outputs: "
+                           (pr-str (vec undeclared))
+                           " -- an event may only write the ids in its :outputs")
+                      {:id            ::undeclared-outputs
+                       :event         (:id event)
+                       :event-inputs  (:inputs event)
+                       :event-outputs (:outputs event)
+                       :undeclared    (vec undeclared)
+                       :declared      (vec declared)}))))
   (reduce-kv
     (fn [ctx id new-value]
-      ;;todo validate that the id matches an ide declared in outputs
       (if (not= (get old-outputs id) new-value)
         (let [path (get-in model [:id->path id])]
           (-> ctx
@@ -62,10 +78,21 @@
   ::change-history => sequential history of changes. List of tuples of path-value pairs"
   [edges {:domino.core/keys [model] :as ctx}]
   (reduce
-   (fn [ctx {{:keys [outputs] :as event} :edge}]
-     (let [db          (::db ctx)
-           old-outputs (get-db-paths model db outputs)]
-       (update-ctx ctx model old-outputs (try-event event ctx db old-outputs))))
+   (fn [ctx {{:keys [inputs outputs] :as event} :edge}]
+     (let [db         (::db ctx)
+           input-vals (get-db-paths model db inputs)]
+       ;; One transaction can change several of an event's inputs, and the
+       ;; traversal queues the event once per changed path. Re-running it when
+       ;; nothing it reads has moved cannot produce a different result, and for
+       ;; a handler that accumulates into its own output -- which the old
+       ;; outputs argument invites -- the extra runs corrupt the accumulation.
+       (if (= input-vals (get (::executed ctx) event))
+         ctx
+         (let [old-outputs (get-db-paths model db outputs)]
+           (-> ctx
+               (assoc-in [::executed event] input-vals)
+               (update-ctx model event old-outputs
+                           (try-event event ctx db old-outputs)))))))
    ctx
    edges))
 
@@ -152,7 +179,8 @@
                                   (assoc ctx ::db db
                                              ::changed-paths empty-queue
                                              ::changes []
-                                             ::db-hashes #{})
+                                             ::db-hashes #{}
+                                             ::executed {})
                                   inputs)
                                 graph)]
     (assoc ctx :domino.core/db db
