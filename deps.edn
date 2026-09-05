@@ -1,6 +1,6 @@
 ;; tools.deps manifest, so domino is consumable as a git dependency, e.g.
 ;;
-;;   io.github.domino-clj/domino {:git/tag "v0.4.0" :git/sha "<sha>"}
+;;   io.github.domino-clj/domino {:git/tag "v0.5.0" :git/sha "<sha>"}
 ;;
 ;; The core data-flow engine (domino.core and its requires) has no runtime
 ;; dependencies beyond Clojure, which the consumer provides. Only graph

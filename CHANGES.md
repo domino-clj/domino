@@ -1,3 +1,9 @@
+### 0.5.0
+
+- **[BREAKING]** an event handler may only write the ids it declared in `:outputs`; returning any other id fails the transaction with `:domino.events/undeclared-outputs`. An undeclared write was invisible to the graph — nothing downstream of that path was triggered and the value landed anyway — and was reachable by accident through a `:post` interceptor, which is composed onto every event that *reads* the path it hangs on
+- an event now runs at most once per transaction for a given set of input values. The traversal queues an event once per changed path, so a transaction changing several of one event's inputs ran the handler once for each; a handler folding into its own output accumulated once per changed input
+- interceptors are documented as being collected from an event's `:inputs`
+
 ### 0.3.3
 
 - **[BREAKING]** replaced async callback API (`:async? true` + 4-arg handler with callback) with derefable returns; async handlers now return `delay`/`future`/`promise` and the engine auto-derefs
