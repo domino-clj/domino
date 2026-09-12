@@ -1,7 +1,8 @@
-(ns domino.async
+(ns domino.async-test
   (:require
     [domino.core :as core]
-    [clojure.test :refer :all]))
+    #?(:clj  [clojure.test :refer :all]
+       :cljs [cljs.test :refer-macros [is deftest]])))
 
 (deftest basic-delay-handler
   (let [ctx (core/initialize
@@ -67,20 +68,21 @@
     (is (= {:a 1 :b 42}
            (:domino.core/db (core/transact ctx [[[:a] 1]]))))))
 
-(deftest future-handler
-  (let [ctx (core/initialize
-              {:model  [[:foo {:id :foo}]
-                        [:bar {:id :bar}]]
-               :events [{:inputs  [:foo]
-                         :outputs [:bar]
-                         :handler (fn [_ {:keys [foo]} _]
-                                    (future {:bar (* foo 10)}))}]})]
-    (is (= {:foo 5 :bar 50}
-           (:domino.core/db (core/transact ctx [[[:foo] 5]]))))))
+#?(:clj
+   (deftest future-handler
+     (let [ctx (core/initialize
+                 {:model  [[:foo {:id :foo}]
+                           [:bar {:id :bar}]]
+                  :events [{:inputs  [:foo]
+                            :outputs [:bar]
+                            :handler (fn [_ {:keys [foo]} _]
+                                       (future {:bar (* foo 10)}))}]})]
+       (is (= {:foo 5 :bar 50}
+              (:domino.core/db (core/transact ctx [[[:foo] 5]])))))))
 
 (deftest error-propagation-from-delay
   (is (thrown-with-msg?
-        clojure.lang.ExceptionInfo
+        #?(:clj clojure.lang.ExceptionInfo :cljs cljs.core/ExceptionInfo)
         #"failed to execute event"
         (let [ctx (core/initialize
                     {:model  [[:a {:id :a}]
