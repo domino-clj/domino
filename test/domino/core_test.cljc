@@ -205,6 +205,18 @@
           #"no effect found"
           (core/trigger-effects ctx [:nonexistent])))))
 
+(deftest transact-nil-change-does-not-defeat-destructuring-defaults
+  ;; issue #24: a nil transacted into an input path must be omitted from
+  ;; the handler input so :or defaults apply
+  (let [ctx (core/initialize {:model [[:a {:id :a}]
+                                       [:c {:id :c}]
+                                       [:d {:id :d}]]
+                              :events [{:inputs  [:a :c]
+                                        :outputs [:d]
+                                        :handler (fn [_ {:keys [a c] :or {c 0}} _] {:d (+ a c)})}]})]
+    (is (= {:a 1 :c nil :d 1}
+           (:domino.core/db (core/transact ctx [[[:a] 1] [[:c] nil]]))))))
+
 (deftest no-key-at-path
   (let [ctx (core/initialize {:model  [[:foo {:id :foo}]
                                        [:bar {:id :bar}]

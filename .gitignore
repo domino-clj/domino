@@ -12,3 +12,7 @@ out/
 docs/out/
 pom.xml.asc
 build.xml
+.clj-kondo/
+.cpcache/
+.jolt/
+.lsp/

@@ -3,15 +3,18 @@
     [domino.model :as model]
     [domino.util :as util :refer [generate-sub-paths]]))
 
-(defn get-db-paths [model db paths]
+(defn get-db-paths
+  "Returns a map of input ids to their values in the db.
+  Paths with absent or nil values are omitted so that handler
+  destructuring defaults (e.g. :or) are not defeated by nil values."
+  [model db paths]
   (reduce
    (fn [id->value path]
-     (let [parent (get-in db (butlast path))]
-       (if (contains? parent (last path))
-         (assoc id->value (model/id-for-path model path) (get-in db path))
-         id->value)))
-    {}
-    paths))
+     (if-some [value (get-in db path)]
+       (assoc id->value (model/id-for-path model path) value)
+       id->value))
+   {}
+   paths))
 
 (def empty-queue
   #?(:clj  clojure.lang.PersistentQueue/EMPTY

@@ -39,6 +39,21 @@ The handler accepts three arguments: a context containing the current state of t
             {:total (+ total amount)})}
 ```
 
+Handlers may be called with partial input. Inputs that have no value in the db, or whose value is
+`nil`, are omitted from the input map rather than being passed as `nil`. This means destructuring
+defaults work as expected:
+
+```clojure
+{:inputs  [:amount :discount]
+ :outputs [:total]
+ :handler (fn [ctx {:keys [amount discount] :or {discount 0}} {:keys [total]}]
+            {:total (- total amount discount)})}
+```
+
+In the above example `discount` is bound to `0` when it has not been populated yet. Handlers should
+not assume that all inputs are present, and events may also run more than once within a transaction
+as their outputs propagate to other events.
+
 
 Domino also provides a `domino.core/event` helper for declaring events, so the above
 event can also be written as follows:

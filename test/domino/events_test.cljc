@@ -80,6 +80,18 @@
     {::core/db             (assoc default-db :a 1 :b nil)
      ::core/change-history [[[:a] 1] [[:b] nil]]}))
 
+(deftest nil-input-value-omitted-from-handler
+  ;; a nil value in the db must not be passed to the handler, otherwise
+  ;; destructuring :or defaults are not applied (issue #24)
+  (test-graph-events
+    (assoc default-db :c nil)
+    [{:inputs  [[:a] [:c]]
+      :outputs [[:d]]
+      :handler (fn [_ {:keys [a c] :or {c 0}} _] {:d (+ a c)})}]
+    [[[:a] 1]]
+    {::core/db             (-> default-db (assoc :a 1 :c nil) (assoc :d 1))
+     ::core/change-history [[[:a] 1] [[:d] 1]]}))
+
 (deftest output-dependent-event
   (test-graph-events
     [{:inputs  [[:a] [:b]]

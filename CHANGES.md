@@ -1,3 +1,7 @@
+### Unreleased
+
+- fix (#24): inputs whose db value is `nil` are now omitted from the handler input map so destructuring defaults (`:or {...}`) are applied; nil inputs were previously passed as explicit `nil`, defeating the defaults
+
 ### 0.5.0
 
 - **[BREAKING]** an event handler may only write the ids it declared in `:outputs`; returning any other id fails the transaction with `:domino.events/undeclared-outputs`. An undeclared write was invisible to the graph — nothing downstream of that path was triggered and the value landed anyway — and was reachable by accident through a `:post` interceptor, which is composed onto every event that *reads* the path it hangs on

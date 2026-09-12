@@ -9,4 +9,6 @@
 {:paths ["src"]
  :deps  {}
  :aliases
- {:visualize {:extra-deps {rhizome/rhizome {:mvn/version "0.2.9"}}}}}
+ {:visualize {:extra-deps {rhizome/rhizome {:mvn/version "0.2.9"}}}
+  :test      {:extra-paths ["test"]
+              :main-opts ["-m" "domino.test-runner"]}}}
